@@ -32,7 +32,7 @@ const defaultContent: Record<string, string> = {
   footerText: 'Cuidado personal sensorial para días reales.',
   whatsapp: '15551234567',
   schedule: 'Lunes a viernes · 9:00 a 18:00',
-  developerCredit: 'Diseño y desarrollo por Estudio Horizonte',
+  developerCredit: 'Diseño y desarrollo por GADR Net',
   cartTitle: 'Tu ritual',
   checkoutTitle: 'Completa tu pedido',
   notificationEmail: '',
