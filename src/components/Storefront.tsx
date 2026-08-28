@@ -80,7 +80,7 @@ export function Storefront({ data }: Props) {
     <main>
       <section className="hero" id="inicio">
         <div className="hero-copy reveal"><p className="eyebrow"><Sparkles size={15}/>{copy.eyebrow}</p><h1>{copy.heroTitle}</h1><p className="hero-lede">{copy.heroDescription}</p><a className="primary-button" href="#catalogo">{copy.heroCta}<ArrowRight /></a></div>
-        <div className="hero-visual reveal delay-1"><div className="image-frame"><img src={copy.heroImage} alt="Productos de cuidado personal Ritual Cobre" /></div><div className="orbit-note">Fórmulas sensoriales<br/>para días reales</div><span className="vertical-caption">RITUAL · PAUSA · PRESENCIA</span></div>
+        <div className="hero-visual reveal delay-1"><div className="image-frame"><img src={copy.heroImage} alt="Productos de cuidado personal Ritual Cobre" loading="eager" decoding="async" fetchPriority="high" /></div><div className="orbit-note">Fórmulas sensoriales<br/>para días reales</div><span className="vertical-caption">RITUAL · PAUSA · PRESENCIA</span></div>
       </section>
 
       <section className="benefits" id="beneficios">
@@ -94,7 +94,7 @@ export function Storefront({ data }: Props) {
           <aside className="filters"><label><Search size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar ritual..." /></label><div className="category-list">{categories.map((item) => <button className={category === item ? 'active' : ''} onClick={() => setCategory(item)} key={item}>{item}<span>{item === 'Todos' ? products.length : products.filter((product) => product.category === item).length}</span></button>)}</div></aside>
           <div className="product-list">{visibleProducts.map((product, index) => <article className="product-row" key={product.id}>
             <div className="product-number">{String(index + 1).padStart(2, '0')}</div>
-            <div className="product-image"><img src={product.image} alt={product.name}/>{product.stock === 0 && <span>Agotado</span>}</div>
+            <div className="product-image"><img src={product.image} alt={product.name} loading="lazy" decoding="async"/>{product.stock === 0 && <span>Agotado</span>}</div>
             <div className="product-info"><p className="product-category">{product.category}</p><h3>{product.name}</h3><p>{product.description}</p><div className="stock-line"><span className={product.stock ? '' : 'empty'}>{product.stock ? `${product.stock} disponibles` : 'Sin existencias'}</span></div></div>
             <div className="product-action"><strong>{money(product.price)}</strong><button disabled={product.stock === 0} onClick={() => addToCart(product)}>{product.stock ? 'Agregar' : 'Agotado'}<Plus /></button></div>
           </article>)}{visibleProducts.length === 0 && <div className="empty-state"><Search/><h3>No encontramos ese ritual</h3><p>Prueba otra palabra o categoría.</p></div>}</div>
