@@ -148,23 +148,62 @@ function buildOrderText(order: Order) {
   ].filter(Boolean).join('\n')
 }
 
-function buildOrderHtml(order: Order) {
-  const cell = 'padding:9px 6px;border-bottom:1px solid #e4d9cd;font-size:13px'
-  const rows = order.items.map((item) => `<tr>
-      <td style="${cell}">${item.name}</td>
-      <td style="${cell};text-align:center">${item.quantity}</td>
-      <td style="${cell};text-align:right">${money(item.price)}</td>
-      <td style="${cell};text-align:right">${money(item.price * item.quantity)}</td>
-    </tr>`).join('')
-  const th = 'text-align:left;text-transform:uppercase;font-size:11px;letter-spacing:.05em;color:#8a7360;padding:8px 6px;border-bottom:1px solid #e4d9cd'
+// Folio corto y estable, derivado del número de pedido, para mostrar en la factura.
+function orderFolio(order: Order) {
+  return `RC-${order.orderNumber.replace(/[^0-9]/g, '').slice(-8) || order.id}`
+}
 
-  return `<div style="font-family:Georgia,'Times New Roman',serif;color:#2c2118;width:720px;padding:44px;background:#faf6f1;box-sizing:border-box">
-    <div style="letter-spacing:.12em;text-transform:uppercase;font-size:12px;color:#8a5a35;font-weight:bold">Ritual Cobre</div>
-    <div style="font-size:30px;font-weight:bold;margin:18px 0 8px">Pedido ${order.orderNumber}</div>
-    <div style="color:#8a7360;font-size:13px;margin:0 0 18px">Fecha: ${shortDate(order.createdAt)}</div>
-    <div style="font-size:14px;margin:0 0 4px"><b>Cliente:</b> ${order.customerName}</div>
-    <div style="color:#8a7360;font-size:13px;margin:0 0 24px">${order.phone || ''} ${order.email ? '· ' + order.email : ''}</div>
-    <table style="width:100%;border-collapse:collapse">
+const statusBadge = (status: string) => {
+  const key = status.toLowerCase()
+  if (key === 'entregado' || key === 'pagado') return { texto: status.toUpperCase(), estilo: 'background:#dcece1;color:#2f6b4b' }
+  if (key === 'cancelado' || key === 'reembolsado') return { texto: status.toUpperCase(), estilo: 'background:#f2d9d4;color:#8c3025' }
+  return { texto: status.toUpperCase(), estilo: 'background:#f4e6cf;color:#8a5a1f' }
+}
+
+// HTML de la factura con la identidad visual de Ritual Cobre (tinta, arcilla y
+// papel — mismas variables que usa el sitio). Se renderiza a un canvas con
+// html2canvas y de ahí sale tanto el PDF (imagen embebida) como la imagen
+// que se comparte, para que ambos documentos luzcan exactamente igual a la
+// vista previa, con color y tipografía incluidos.
+function buildOrderHtml(order: Order) {
+  const ink = '#182431'; const clay = '#ba5b46'; const paper = '#f4eee9'; const line = 'rgba(24,36,49,.14)'; const muted = '#6d6e70'
+  const rows = order.items.map((item) => `<tr>
+      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px">${item.name}</td>
+      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px;text-align:center">${item.quantity}</td>
+      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px;text-align:right">${money(item.price)}</td>
+      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px;text-align:right;font-weight:700">${money(item.price * item.quantity)}</td>
+    </tr>`).join('')
+  const th = `text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:${clay};padding:9px 10px;border-bottom:2px solid ${clay}`
+  const estado = statusBadge(order.status)
+  const pago = statusBadge(order.paymentStatus)
+
+  return `<div id="rc-factura" style="width:720px;background:${paper};color:${ink};font-family:'Manrope',system-ui,sans-serif;padding:48px;box-sizing:border-box">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${ink};padding-bottom:22px;margin-bottom:28px">
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:700;letter-spacing:-.02em">Ritual Cobre</div>
+        <div style="font-size:12px;color:${muted};margin-top:6px">Cuidado personal · hecho con intención</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:20px;font-weight:800;color:${clay};letter-spacing:.04em">PEDIDO</div>
+        <div style="font-size:12px;color:${muted};margin-top:4px">Folio: <strong style="color:${ink}">${orderFolio(order)}</strong></div>
+        <div style="font-size:12px;color:${muted}">Fecha: ${shortDate(order.createdAt)}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;gap:24px;margin-bottom:26px">
+      <div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${muted};margin-bottom:6px">Cliente</div>
+        <div style="font-size:16px;font-weight:700">${order.customerName}</div>
+        <div style="font-size:13px;color:${muted};margin-top:2px">${order.phone || ''}${order.email ? ' · ' + order.email : ''}</div>
+        ${order.address ? `<div style="font-size:13px;color:${muted};margin-top:2px;max-width:320px">${order.address}</div>` : ''}
+      </div>
+      <div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+        <span style="display:inline-block;font-size:11px;font-weight:700;padding:5px 14px;border-radius:999px;${estado.estilo}">${estado.texto}</span>
+        <span style="display:inline-block;font-size:11px;font-weight:700;padding:5px 14px;border-radius:999px;${pago.estilo}">PAGO ${pago.texto}</span>
+      </div>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
       <thead><tr>
         <th style="${th}">Producto</th>
         <th style="${th};text-align:center">Cant.</th>
@@ -173,36 +212,69 @@ function buildOrderHtml(order: Order) {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><td style="padding:12px 6px 4px;border-top:2px solid #2c2118;font-weight:bold;font-size:17px">Total</td><td style="padding:12px 6px 4px;border-top:2px solid #2c2118;font-weight:bold;font-size:17px;text-align:right">${money(order.total)}</td></tr></table>
+    <table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><td style="padding:16px 10px 4px;border-top:2px solid ${ink};font-weight:800;font-size:13px;color:${muted};text-transform:uppercase;letter-spacing:.05em">Total</td><td style="padding:16px 10px 4px;border-top:2px solid ${ink};font-weight:800;font-size:22px;text-align:right;font-family:'Syne',sans-serif">${money(order.total)}</td></tr></table>
+
+    <div style="border-top:1px solid ${line};margin-top:28px;padding-top:16px;font-size:11px;color:${muted};text-align:center">
+      Gracias por hacer espacio para este ritual. Documento generado automáticamente.
+    </div>
   </div>`
 }
 
-async function buildOrderPdf(order: Order): Promise<jsPDF> {
-  return new Promise((resolve) => {
-    const container = document.createElement('div')
-    container.style.position = 'fixed'
-    container.style.top = '0'
-    container.style.left = '0'
-    container.style.zIndex = '-9999'
-    container.style.opacity = '0.01'
-    container.style.pointerEvents = 'none'
-    container.innerHTML = buildOrderHtml(order)
-    document.body.appendChild(container)
-    const doc = new jsPDF('p', 'pt', 'letter')
-    doc.html(container, {
-      x: 0, y: 0, width: 612, windowWidth: 720, autoPaging: 'text',
-      callback: (pdf) => { document.body.removeChild(container); resolve(pdf) },
-    })
-  })
+// Renderiza la factura en un iframe aislado (sin las hojas de estilo del
+// sitio) para que html2canvas capture únicamente los estilos inline de
+// arriba, y devuelve el canvas resultante. El iframe se retira siempre,
+// incluso si algo falla, para no dejar contenido ancho suelto en la página
+// (eso es lo que causaba que el sitio se viera "corrido" hacia un lado).
+async function renderOrderCanvas(order: Order) {
+  const { default: html2canvas } = await import('html2canvas')
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.top = '0'
+  iframe.style.left = '-99999px'
+  iframe.style.width = '720px'
+  iframe.style.height = '10px'
+  iframe.style.border = '0'
+  document.body.appendChild(iframe)
+  try {
+    const idoc = iframe.contentDocument
+    if (!idoc) throw new Error('No se pudo preparar la factura.')
+    idoc.open()
+    idoc.write('<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700&family=Manrope:wght@400;600;700;800&display=swap"></head><body style="margin:0;padding:0"></body></html>')
+    idoc.close()
+    idoc.body.innerHTML = buildOrderHtml(order)
+    if (idoc.fonts?.ready) await Promise.race([idoc.fonts.ready, new Promise((r) => setTimeout(r, 300))])
+    return await html2canvas(idoc.body.firstElementChild as HTMLElement, { scale: 2, backgroundColor: '#f4eee9', windowWidth: 720 })
+  } finally {
+    document.body.removeChild(iframe)
+  }
 }
 
 async function downloadOrder(order: Order) {
-  const pdf = await buildOrderPdf(order)
-  pdf.save(`${order.orderNumber}.pdf`)
+  const canvas = await renderOrderCanvas(order)
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const imgWidth = pageWidth - 40
+  const imgHeight = imgWidth * (canvas.height / canvas.width)
+  pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 20, 20, imgWidth, imgHeight)
+  pdf.save(`Pedido-${order.orderNumber}.pdf`)
 }
 
 async function shareOrder(order: Order) {
   const text = buildOrderText(order)
+  try {
+    const canvas = await renderOrderCanvas(order)
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (blob) {
+      const file = new File([blob], `Pedido-${order.orderNumber}.png`, { type: 'image/png' })
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Pedido ${order.orderNumber}`, text })
+        return
+      }
+    }
+  } catch (caught) {
+    if (caught instanceof Error && caught.name === 'AbortError') return // el usuario canceló
+    // si falla la imagen, seguimos abajo con el texto plano
+  }
   if (navigator.share) {
     try { await navigator.share({ title: `Pedido ${order.orderNumber}`, text }); return } catch { /* usuario canceló */ }
   }
@@ -210,7 +282,7 @@ async function shareOrder(order: Order) {
 }
 
 function OrderTable({ orders, onRefresh, onView, onShare, onDelete }: { orders: Order[]; onRefresh: () => Promise<void>; onView: (order: Order) => void; onShare: (order: Order) => void; onDelete: (order: Order) => void }) {
-  return <div className="table-wrap"><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Fecha</th><th>Estado</th><th>Pago</th><th>Total</th><th/></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td><strong>{order.orderNumber}</strong></td><td>{order.customerName}<small>{order.email}</small></td><td>{shortDate(order.createdAt)}</td><td><select value={order.status} onChange={async (event) => { await updateOrderStatus({ data: { id: order.id, status: event.target.value, paymentStatus: order.paymentStatus } }); await onRefresh() }}><option>Pendiente</option><option>Preparando</option><option>Enviado</option><option>Entregado</option><option>Cancelado</option></select></td><td><select value={order.paymentStatus} onChange={async (event) => { await updateOrderStatus({ data: { id: order.id, status: order.status, paymentStatus: event.target.value } }); await onRefresh() }}><option>Pendiente</option><option>Pagado</option><option>Reembolsado</option></select></td><td><strong>{money(order.total)}</strong></td><td><div className="row-actions"><button onClick={() => onView(order)}><Download/></button><button onClick={() => onShare(order)}><Share2/></button><button onClick={() => onDelete(order)}><Trash2/></button></div></td></tr>)}</tbody></table>{!orders.length && <div className="empty-admin">Todavía no hay pedidos.</div>}</div>
+  return <div className="table-wrap"><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Fecha</th><th>Estado</th><th>Pago</th><th>Total</th><th className="col-actions"/></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td><strong>{order.orderNumber}</strong></td><td>{order.customerName}<small>{order.email}</small></td><td>{shortDate(order.createdAt)}</td><td><select value={order.status} onChange={async (event) => { await updateOrderStatus({ data: { id: order.id, status: event.target.value, paymentStatus: order.paymentStatus } }); await onRefresh() }}><option>Pendiente</option><option>Preparando</option><option>Enviado</option><option>Entregado</option><option>Cancelado</option></select></td><td><select value={order.paymentStatus} onChange={async (event) => { await updateOrderStatus({ data: { id: order.id, status: order.status, paymentStatus: event.target.value } }); await onRefresh() }}><option>Pendiente</option><option>Pagado</option><option>Reembolsado</option></select></td><td><strong>{money(order.total)}</strong></td><td className="col-actions"><div className="row-actions"><button onClick={() => onView(order)}><Download/></button><button onClick={() => onShare(order)}><Share2/></button><button onClick={() => onDelete(order)}><Trash2/></button></div></td></tr>)}</tbody></table>{!orders.length && <div className="empty-admin">Todavía no hay pedidos.</div>}</div>
 }
 
 function ContentEditor({ values, onChange, onUpload, onSave, busy }: { values: Record<string, string>; onChange: (value: Record<string, string>) => void; onUpload: (file: File) => void; onSave: () => Promise<void>; busy: boolean }) {
