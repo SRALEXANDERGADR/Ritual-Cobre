@@ -100,10 +100,10 @@ export const createOrder = createServerFn({ method: 'POST' })
       : (await db.insert(customers).values({ name: data.name, email: data.email, phone: data.phone, address: data.address }).returning())[0]
     const orderNumber = `RC-${Date.now().toString().slice(-8)}`
     const createdAt = new Date()
-    await db.transaction(async (tx) => {
-      await tx.insert(orders).values({ orderNumber, customerId: customer.id, customerName: data.name, email: data.email, phone: data.phone, address: data.address, items: calculated, total, createdAt })
-      for (const item of calculated) await tx.update(products).set({ stock: sql`${products.stock} - ${item.quantity}` }).where(and(eq(products.id, item.productId), sql`${products.stock} >= ${item.quantity}`))
-    })
+    // Nota: el driver HTTP de Neon (neon-http) no soporta transacciones (db.transaction),
+    // por eso aqui se ejecutan las operaciones de forma secuencial en vez de envueltas en una transaccion.
+    await db.insert(orders).values({ orderNumber, customerId: customer.id, customerName: data.name, email: data.email, phone: data.phone, address: data.address, items: calculated, total, createdAt })
+    for (const item of calculated) await db.update(products).set({ stock: sql`${products.stock} - ${item.quantity}` }).where(and(eq(products.id, item.productId), sql`${products.stock} >= ${item.quantity}`))
 
     const [notificationRow] = await db.select().from(content).where(eq(content.key, 'notificationEmail')).limit(1)
     if (notificationRow?.value) {
