@@ -1,7 +1,7 @@
-packages:
-  - '.'
-
 allowBuilds:
-  core-js: true
-  esbuild: true
-  workerd: true
+  core-js: set this to true or false
+  esbuild: set this to true or false
+  workerd: set this to true or false
+onlyBuiltDependencies:
+  - esbuild
+  - core-js
