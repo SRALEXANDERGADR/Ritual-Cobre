@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://ritualcobre.gadr-net.workers.dev/sitemap.xml

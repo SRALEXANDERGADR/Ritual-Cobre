@@ -14,8 +14,18 @@ async function sign(payload: string) {
   return toHex(signature)
 }
 
+// Comparación en tiempo constante (compara las firmas HMAC de ambos textos),
+// para no revelar pistas sobre la contraseña por el tiempo de respuesta.
+async function safeEqual(a: string, b: string) {
+  const [left, right] = await Promise.all([sign(`cmp:${a}`), sign(`cmp:${b}`)])
+  let diff = left.length ^ right.length
+  for (let i = 0; i < Math.min(left.length, right.length); i++) diff |= left.charCodeAt(i) ^ right.charCodeAt(i)
+  return diff === 0
+}
+
 export async function verifyPassword(password: string) {
-  return password.length > 0 && password === env.ADMIN_PASSWORD
+  if (!password || !env.ADMIN_PASSWORD) return false
+  return safeEqual(password, env.ADMIN_PASSWORD)
 }
 
 export async function createSession() {
@@ -38,7 +48,7 @@ export async function verifySession() {
   if (!payload || !signature) return false
   if (Number(payload) < Date.now()) return false
   const expected = await sign(payload)
-  return expected === signature
+  return safeEqual(expected, signature)
 }
 
 export function clearSession() {

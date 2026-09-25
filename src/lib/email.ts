@@ -10,8 +10,9 @@
 // nada y el pedido se registra igual: un fallo o falta de configuración en
 // el correo nunca debe romper el registro del pedido.
 
-const money = (cents: number) => new Intl.NumberFormat('es-US', { style: 'currency', currency: 'USD' }).format(cents / 100)
-const shortDate = (value: string | Date) => new Intl.DateTimeFormat('es-DO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+import { escapeHtml, formatMoney } from './format'
+
+const longDate = (value: string | Date) => new Intl.DateTimeFormat('es-DO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Santo_Domingo' }).format(new Date(value))
 
 type EmailOrder = {
   orderNumber: string
@@ -21,26 +22,27 @@ type EmailOrder = {
   phone: string
   address: string
   total: number
+  currency: string
+  brandName: string
   items: Array<{ name: string; price: number; quantity: number }>
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+const INK = '#182431'
+const CLAY = '#ba5b46'
+const PAPER = '#f4eee9'
+const MUTED = '#6d6e70'
 
 function buildOrderEmailHtml(order: EmailOrder): string {
+  const money = (cents: number) => formatMoney(cents, order.currency)
+  const phoneDigits = order.phone.replace(/\D/g, '')
   const rows = order.items
     .map(
       (item) => `
         <tr>
-          <td style="padding:10px 12px;border-bottom:1px solid #eee;color:#333;font-size:14px;">${escapeHtml(item.name)}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid #eee;color:#333;font-size:14px;text-align:center;">${item.quantity}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid #eee;color:#333;font-size:14px;text-align:right;">${money(item.price)}</td>
-          <td style="padding:10px 12px;border-bottom:1px solid #eee;color:#333;font-size:14px;text-align:right;font-weight:600;">${money(item.price * item.quantity)}</td>
+          <td style="padding:12px;border-bottom:1px solid #ece4dd;color:${INK};font-size:14px;">${escapeHtml(item.name)}</td>
+          <td style="padding:12px;border-bottom:1px solid #ece4dd;color:${INK};font-size:14px;text-align:center;">${item.quantity}</td>
+          <td style="padding:12px;border-bottom:1px solid #ece4dd;color:${INK};font-size:14px;text-align:right;">${money(item.price)}</td>
+          <td style="padding:12px;border-bottom:1px solid #ece4dd;color:${INK};font-size:14px;text-align:right;font-weight:700;">${money(item.price * item.quantity)}</td>
         </tr>`,
     )
     .join('')
@@ -48,72 +50,61 @@ function buildOrderEmailHtml(order: EmailOrder): string {
   return `
   <!DOCTYPE html>
   <html lang="es">
-  <body style="margin:0;padding:0;background-color:#f4f1ee;font-family:Arial,Helvetica,sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f1ee;padding:24px 0;">
+  <body style="margin:0;padding:0;background-color:${PAPER};font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${PAPER};padding:28px 12px;">
       <tr>
         <td align="center">
-          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
-
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:14px;overflow:hidden;max-width:600px;width:100%;">
             <tr>
-              <td style="background-color:#3c2415;padding:28px 32px;">
-                <p style="margin:0;color:#e3b98a;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Nuevo pedido</p>
-                <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;">Pedido ${escapeHtml(order.orderNumber)}</h1>
-                <p style="margin:6px 0 0;color:#c9c2bb;font-size:13px;">${shortDate(order.createdAt)}</p>
+              <td style="background-color:${INK};padding:28px 32px;">
+                <p style="margin:0;color:#d8a09b;font-size:11px;letter-spacing:3px;text-transform:uppercase;">${escapeHtml(order.brandName)} · Nuevo pedido</p>
+                <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;">Pedido ${escapeHtml(order.orderNumber)}</h1>
+                <p style="margin:6px 0 0;color:#aeb5bb;font-size:13px;">${longDate(order.createdAt)} · Total ${money(order.total)}</p>
               </td>
             </tr>
-
             <tr>
               <td style="padding:28px 32px 0;">
-                <h2 style="margin:0 0 12px;color:#1f1b18;font-size:15px;">Datos del cliente</h2>
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#faf8f6;border-radius:8px;">
+                <p style="margin:0 0 10px;color:${CLAY};font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;">Cliente</p>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#faf7f4;border-radius:10px;">
                   <tr>
-                    <td style="padding:14px 16px;font-size:14px;color:#333;">
-                      <p style="margin:0 0 6px;"><strong>Nombre:</strong> ${escapeHtml(order.customerName)}</p>
-                      <p style="margin:0 0 6px;"><strong>Teléfono:</strong> ${escapeHtml(order.phone)}</p>
-                      <p style="margin:0 0 6px;"><strong>Correo:</strong> ${order.email ? escapeHtml(order.email) : 'No proporcionado'}</p>
-                      <p style="margin:0;"><strong>Dirección:</strong> ${order.address ? escapeHtml(order.address) : 'No proporcionada'}</p>
+                    <td style="padding:16px 18px;font-size:14px;color:${INK};line-height:1.6;">
+                      <strong style="font-size:16px;">${escapeHtml(order.customerName)}</strong><br>
+                      Teléfono: ${escapeHtml(order.phone)}<br>
+                      Correo: ${order.email ? `<a href="mailto:${escapeHtml(order.email)}" style="color:${CLAY};">${escapeHtml(order.email)}</a>` : 'No proporcionado'}<br>
+                      Dirección: ${order.address ? escapeHtml(order.address).replace(/\n/g, '<br>') : 'No proporcionada'}
                     </td>
                   </tr>
                 </table>
+                ${phoneDigits ? `<p style="margin:14px 0 0;"><a href="https://wa.me/${phoneDigits}" style="display:inline-block;background-color:${CLAY};color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:11px 18px;border-radius:4px;">Escribir al cliente por WhatsApp</a></p>` : ''}
               </td>
             </tr>
-
             <tr>
-              <td style="padding:24px 32px 0;">
-                <h2 style="margin:0 0 12px;color:#1f1b18;font-size:15px;">Productos encargados</h2>
+              <td style="padding:26px 32px 0;">
+                <p style="margin:0 0 10px;color:${CLAY};font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;">Productos</p>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
                   <thead>
                     <tr>
-                      <th style="padding:10px 12px;background-color:#3c2415;color:#ffffff;font-size:12px;text-align:left;">Producto</th>
-                      <th style="padding:10px 12px;background-color:#3c2415;color:#ffffff;font-size:12px;text-align:center;">Cant.</th>
-                      <th style="padding:10px 12px;background-color:#3c2415;color:#ffffff;font-size:12px;text-align:right;">Precio</th>
-                      <th style="padding:10px 12px;background-color:#3c2415;color:#ffffff;font-size:12px;text-align:right;">Total</th>
+                      <th style="padding:10px 12px;border-bottom:2px solid ${INK};color:${MUTED};font-size:11px;text-align:left;text-transform:uppercase;">Producto</th>
+                      <th style="padding:10px 12px;border-bottom:2px solid ${INK};color:${MUTED};font-size:11px;text-align:center;text-transform:uppercase;">Cant.</th>
+                      <th style="padding:10px 12px;border-bottom:2px solid ${INK};color:${MUTED};font-size:11px;text-align:right;text-transform:uppercase;">Precio</th>
+                      <th style="padding:10px 12px;border-bottom:2px solid ${INK};color:${MUTED};font-size:11px;text-align:right;text-transform:uppercase;">Total</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    ${rows}
-                  </tbody>
+                  <tbody>${rows}</tbody>
                 </table>
-              </td>
-            </tr>
-
-            <tr>
-              <td style="padding:20px 32px 0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;">
                   <tr>
-                    <td style="padding:8px 0;color:#1f1b18;font-size:16px;font-weight:700;border-top:1px solid #eee;">Total</td>
-                    <td style="padding:8px 0;color:#1f1b18;font-size:16px;font-weight:700;text-align:right;border-top:1px solid #eee;">${money(order.total)}</td>
+                    <td style="padding:14px 12px;color:${INK};font-size:16px;font-weight:700;">Total del pedido</td>
+                    <td style="padding:14px 12px;color:${CLAY};font-size:20px;font-weight:700;text-align:right;">${money(order.total)}</td>
                   </tr>
                 </table>
               </td>
             </tr>
-
             <tr>
-              <td style="padding:28px 32px 32px;">
-                <p style="margin:0;color:#999;font-size:12px;text-align:center;">Este correo se generó automáticamente cuando el cliente completó su pedido en la tienda.</p>
+              <td style="padding:22px 32px 30px;">
+                <p style="margin:0;color:#9a9a9a;font-size:12px;text-align:center;line-height:1.6;">Correo automático de ${escapeHtml(order.brandName)}. Gestiona este pedido desde el panel de administración.</p>
               </td>
             </tr>
-
           </table>
         </td>
       </tr>
@@ -133,7 +124,7 @@ export async function sendOrderNotificationEmail(env: Env, to: string, order: Em
   }
 
   try {
-    const from = env.RESEND_FROM_EMAIL || 'Ritual Cobre <onboarding@resend.dev>'
+    const from = env.RESEND_FROM_EMAIL || `${order.brandName} <onboarding@resend.dev>`
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -143,7 +134,8 @@ export async function sendOrderNotificationEmail(env: Env, to: string, order: Em
       body: JSON.stringify({
         from,
         to: [to],
-        subject: `Nuevo pedido: ${order.orderNumber} — ${order.customerName}`,
+        subject: `Nuevo pedido ${order.orderNumber} · ${order.customerName} · ${formatMoney(order.total, order.currency)}`,
+        reply_to: order.email || undefined,
         html: buildOrderEmailHtml(order),
       }),
     })

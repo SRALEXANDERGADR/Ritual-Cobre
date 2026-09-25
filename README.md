@@ -21,6 +21,17 @@ Tienda online completa de cuidado personal con catálogo filtrable, carrito late
 - **Editor de contenido**: todos los textos e imágenes del sitio, incluyendo el correo que recibe el aviso de nuevos pedidos.
 - Búsqueda incluida en productos, clientes y pedidos.
 
+## Novedades (v2)
+
+- **Identidad**: isotipo propio (arco de cobre con gota) en tienda, panel, facturas y 404; favicon, ícono para iPhone/Android (`public/`), `site.webmanifest` y portada para redes (`public/assets/portada.png`, 1200×630).
+- **Tienda**: cabecera fija, vista rápida de producto, orden por precio/nombre, etiquetas «Favorito» y «Últimas unidades», bolsa que se conserva al recargar, nota en el pedido, botón flotante y confirmación por WhatsApp, página 404.
+- **Políticas**: seis secciones editables desde el panel (privacidad, pedidos, envíos, devoluciones, términos y contacto).
+- **Panel**: resumen con cobrado / por cobrar / ticket promedio, stock bajo y más vendidos; detalle completo de cada pedido; filtros por estado y categoría; precios en unidades normales (no centavos); vista previa de imágenes; avisos de guardado; navegación inferior en móvil.
+- **Moneda configurable** (USD, DOP, EUR, MXN, COP) desde **Editor de contenido → Tienda y contacto**.
+- **Seguridad**: validación completa del pedido en el servidor (cantidades, stock, datos), reserva de stock sin sobreventa, la factura escapa el texto de los clientes, el correo de avisos ya no se expone en la tienda pública, comparación de contraseña en tiempo constante.
+- **Inventario**: al cancelar un pedido las unidades vuelven al stock (y se descuentan otra vez si se reactiva). Al eliminar un pedido pendiente o en preparación, también.
+- La URL pública usada en las etiquetas de redes está en `src/lib/format.ts` (`SITE_URL`).
+
 ## Desarrollo local
 
 1. Instala dependencias con `pnpm install`.

@@ -1,0 +1,15 @@
+{
+  "name": "Ritual Cobre",
+  "short_name": "Ritual Cobre",
+  "description": "Cuidado personal sensorial para días reales.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4eee9",
+  "theme_color": "#182431",
+  "lang": "es",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
