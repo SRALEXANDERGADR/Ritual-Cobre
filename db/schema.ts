@@ -1,68 +1,188 @@
-import {
-  boolean,
-  index,
-  integer,
-  json,
-  pgTable,
-  serial,
-  text,
-  timestamp,
-  uniqueIndex,
-} from 'drizzle-orm/pg-core'
+import { pgTable, serial, text, integer, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core'
+import type { ProductVariant } from '../src/lib/variants'
 
-export const products = pgTable(
-  'products',
-  {
-    id: serial().primaryKey(),
-    name: text().notNull(),
-    slug: text().notNull(),
-    category: text().notNull(),
-    description: text().notNull().default(''),
-    price: integer().notNull(),
-    stock: integer().notNull().default(0),
-    image: text().notNull().default(''),
-    featured: boolean().notNull().default(false),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [uniqueIndex('products_slug_idx').on(table.slug), index('products_category_idx').on(table.category)],
-)
+// ───────────────────────────────────────────────────────────────────────
+// PRODUCTOS — catálogo de Ritual Cobre (rostro, cuerpo, aromas, baño...).
+// `price` es el precio de venta actual; `originalPrice` es el precio
+// anterior cuando el producto está en oferta (0 = sin descuento). Las
+// banderas featured/isNew/bestSeller marcan Favorito, Nuevo y Más vendido.
+// (La tabla vieja también tiene `slug`; ya no se usa y admite vacío.)
+// ───────────────────────────────────────────────────────────────────────
+export const products = pgTable('products', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  category: text('category').notNull().default('Otros'),
+  description: text('description').notNull().default(''),
+  // Opciones seleccionables (color/diseño/modelo), separadas por coma, ej. "Negro, Azul, Transparente".
+  // Vacío = el producto no muestra selector. El precio y la cantidad propios
+  // de cada opción (si los tiene) se guardan en `variantImages`.
+  options: text('options').notNull().default(''),
+  price: integer('price').notNull().default(0), // centavos
+  originalPrice: integer('original_price').notNull().default(0), // centavos, 0 = sin descuento
+  stock: integer('stock').notNull().default(0),
+  // Costo promedio ponderado por unidad, en centavos. Se recalcula solo
+  // cada vez que se registra una compra (ver tabla `purchases`): no se
+  // edita a mano desde el formulario del producto.
+  cost: integer('cost').notNull().default(0),
+  image: text('image').notNull().default(''),
+  // Imagen y descripción específicas por opción (color/diseño/modelo,
+  // ej. "Batman" o "iPhone 14 Pro Max"). Cada entrada debe coincidir
+  // EXACTO con uno de los valores separados por coma en `options`. Si una
+  // opción no tiene entrada aquí, la tienda usa la imagen y la
+  // descripción generales del producto (arriba) como hasta ahora — no
+  // reemplaza `options`, solo lo enriquece opción por opción.
+  //
+  // Cada entrada también puede tener `price` (precio propio de esa opción,
+  // en centavos; 0 = usa el precio general) y `stock` (cantidad de esa
+  // opción, solo cuando `optionStock` está activado). Ver src/lib/variants.ts.
+  variantImages: jsonb('variant_images').notNull().default([]).$type<ProductVariant[]>(),
+  // true = "Cada opción tiene su propia cantidad": se vende, se repone y se
+  // cuenta por opción, y `stock` pasa a ser la suma de todas las opciones.
+  optionStock: boolean('option_stock').notNull().default(false),
+  featured: boolean('featured').notNull().default(false), // pestaña Destacados
+  isNew: boolean('is_new').notNull().default(false), // pestaña Nuevos
+  bestSeller: boolean('best_seller').notNull().default(false), // pestaña Más vendidos
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  // Papelera: NULL = visible normalmente. Con fecha = enviado a la
+  // papelera; se restaura poniendo esto en NULL de nuevo, o se elimina
+  // definitivamente (junto a su imagen) 30 días después de esta fecha.
+  deletedAt: timestamp('deleted_at'),
+})
 
-export const customers = pgTable(
-  'customers',
-  {
-    id: serial().primaryKey(),
-    name: text().notNull(),
-    email: text().notNull().default(''),
-    phone: text().notNull().default(''),
-    address: text().notNull().default(''),
-    notes: text().notNull().default(''),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [index('customers_email_idx').on(table.email), index('customers_name_idx').on(table.name)],
-)
+// ───────────────────────────────────────────────────────────────────────
+// CLIENTES
+// ───────────────────────────────────────────────────────────────────────
+export const customers = pgTable('customers', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().default(''),
+  phone: text('phone').notNull().default(''),
+  address: text('address').notNull().default(''),
+  notes: text('notes').notNull().default(''),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at'), // papelera, igual que products
+})
 
-export const orders = pgTable(
-  'orders',
-  {
-    id: serial().primaryKey(),
-    orderNumber: text('order_number').notNull(),
-    customerId: integer('customer_id').references(() => customers.id),
-    customerName: text('customer_name').notNull(),
-    email: text().notNull().default(''),
-    phone: text().notNull().default(''),
-    address: text().notNull().default(''),
-    items: json().notNull().$type<Array<{ productId: number; name: string; price: number; quantity: number; image: string }>>(),
-    total: integer().notNull(),
-    status: text().notNull().default('Pendiente'),
-    paymentStatus: text('payment_status').notNull().default('Pendiente'),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [uniqueIndex('orders_number_idx').on(table.orderNumber), index('orders_customer_idx').on(table.customerId)],
-)
+// ───────────────────────────────────────────────────────────────────────
+// PEDIDOS — el checkout de la tienda crea un pedido interno (no procesa
+// pagos con tarjeta); el pago y la entrega se coordinan después por
+// WhatsApp. El folio se genera al crearse.
+// ───────────────────────────────────────────────────────────────────────
+export const orders = pgTable('orders', {
+  id: serial('id').primaryKey(),
+  orderNumber: text('order_number').notNull().unique(),
+  customerId: integer('customer_id'),
+  customerName: text('customer_name').notNull(),
+  email: text('email').notNull().default(''),
+  phone: text('phone').notNull().default(''),
+  address: text('address').notNull().default(''),
+  // `cost` es el costo promedio del producto en el momento de la venta
+  // (copia, no referencia) — así la Ganancia de un pedido ya hecho no
+  // cambia si más adelante compras ese mismo producto a otro costo.
+  // `option` = la opción elegida (color/diseño). Los pedidos viejos no la
+  // tienen: en ese caso se saca del nombre ("Producto — opción").
+  // `reinvQty` = cuántas de esas unidades salieron de lotes comprados con el
+  // "Dinero para reinvertir", y `reinvCost` lo que costaron EN TOTAL (no por
+  // unidad). Sin estos campos = todo salió del dinero del negocio.
+  items: jsonb('items').notNull().$type<Array<{ id: number; name: string; price: number; quantity: number; cost: number; option?: string; reinvCost?: number; reinvQty?: number }>>(),
+  // Descuento manual aplicado por el admin al negociar con el cliente
+  // (en centavos). 0 = sin descuento. `total` ya sale con el descuento
+  // restado — se recalcula en el servidor cada vez que se edita el pedido.
+  discount: integer('discount').notNull().default(0),
+  total: integer('total').notNull(),
+  status: text('status').notNull().default('Pendiente'), // Pendiente, Confirmado, Preparando, Enviado, Entregado, Cancelado
+  paymentStatus: text('payment_status').notNull().default('Pendiente'), // Pendiente, Pagado
+  notes: text('notes').notNull().default(''), // notas internas del admin
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at'), // papelera
+})
 
+// ───────────────────────────────────────────────────────────────────────
+// PAPELERA DE IMÁGENES — cuando se reemplaza o se elimina definitivamente
+// la imagen de un producto, la imagen anterior (que vive en el repo de
+// GitHub, no en la base de datos) no se borra de inmediato: se registra
+// aquí con la ruta que tenía en el repo. 30 días después de `deletedAt`,
+// un job de limpieza la borra de GitHub de verdad y quita esta fila.
+// ───────────────────────────────────────────────────────────────────────
+export const imageTrash = pgTable('image_trash', {
+  id: serial('id').primaryKey(),
+  path: text('path').notNull(), // ruta dentro del repo, ej. public/uploads/123-telefono.jpg
+  url: text('url').notNull(), // download_url original (raw.githubusercontent.com/...)
+  reason: text('reason').notNull().default(''), // ej. 'imagen reemplazada', 'producto eliminado'
+  deletedAt: timestamp('deleted_at').notNull().defaultNow(),
+})
+
+// ───────────────────────────────────────────────────────────────────────
+// CONTENIDO DEL SITIO (editor de textos e imágenes desde el admin: marca,
+// WhatsApp, dirección, horario, redes sociales, textos del hero, etc.)
+// También guarda aquí 2 valores de configuración de Finanzas
+// (`capitalInicial`, `reinvestPercent`) reutilizando esta misma tabla
+// clave-valor en vez de crear una tabla de un solo renglón.
+// ───────────────────────────────────────────────────────────────────────
 export const content = pgTable('content', {
-  key: text().primaryKey(),
-  value: text().notNull().default(''),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  key: text('key').primaryKey(),
+  value: text('value').notNull().default(''),
+})
+
+// ───────────────────────────────────────────────────────────────────────
+// COMPRAS — cada reposición de inventario. Reemplaza la hoja "Inventario"
+// del Excel: en vez de una fila nueva a mano, cada compra aquí (a) suma
+// `quantity` al stock del producto y (b) recalcula `products.cost` como
+// costo promedio ponderado. Es un libro de solo lectura una vez creado
+// (no se edita ni se borra) para que el historial de costos nunca quede
+// inconsistente — si hay un error, se corrige con otra compra o, si es
+// necesario, a mano en la base de datos.
+// ───────────────────────────────────────────────────────────────────────
+export const purchases = pgTable('purchases', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull(),
+  productName: text('product_name').notNull(), // copia del nombre, por si el producto se borra después
+  // Opción (color/diseño) a la que pertenece este lote. '' = lote del
+  // producto en general (o de antes de separar por opción): en un producto
+  // con cantidad por opción, cualquier opción puede salir de ese lote.
+  option: text('option').notNull().default(''),
+  // Con qué dinero se pagó este lote: 'capital' (dinero del negocio) o
+  // 'reinversion' (el dinero para reinvertir, que es de la dueña). Al
+  // vender, lo que costó vuelve a esa misma caja.
+  fund: text('fund').notNull().default('capital'),
+  quantity: integer('quantity').notNull(),
+  unitCost: integer('unit_cost').notNull(), // centavos
+  totalCost: integer('total_cost').notNull(), // centavos = quantity * unitCost
+  // Cuánto queda de este lote sin vender todavía. Empieza en `quantity` y
+  // baja con cada venta (consumo FIFO: se gasta el lote más viejo
+  // primero). Cuando llega a 0, la próxima venta pasa al siguiente lote.
+  remainingQuantity: integer('remaining_quantity').notNull(),
+  notes: text('notes').notNull().default(''),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+
+// ───────────────────────────────────────────────────────────────────────
+// GASTOS — reemplaza la hoja "Gastos". `type` separa gasto del negocio
+// (sale del Capital disponible del negocio) de gasto o
+// retiro personal (se resta de lo que ya le toca a la dueña, no afecta la
+// ganancia del negocio). Esto reemplaza la mezcla confusa de "Gastos" y
+// "gastos personales" que tenía el Excel.
+// ───────────────────────────────────────────────────────────────────────
+export const expenses = pgTable('expenses', {
+  id: serial('id').primaryKey(),
+  type: text('type').notNull().default('negocio'), // 'negocio' | 'personal'
+  description: text('description').notNull(),
+  amount: integer('amount').notNull(), // centavos
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+
+// ───────────────────────────────────────────────────────────────────────
+// TELÉFONOS / COMPUTADORAS QUE RECIBEN NOTIFICACIONES — cada vez que se
+// activan las notificaciones en la app del panel admin se guarda aquí la
+// "dirección" push de ese aparato. Si la app se desinstala o se quita el
+// permiso, el servicio de push responde que ya no existe y se borra sola.
+// ───────────────────────────────────────────────────────────────────────
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: serial('id').primaryKey(),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  label: text('label').notNull().default(''), // ej. "Android · Chrome"
+  createdAt: timestamp('created_at').notNull().defaultNow(),
 })

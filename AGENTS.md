@@ -10,7 +10,10 @@ Ritual Cobre is a TanStack Start ecommerce application deployed on Cloudflare Wo
 - `src/components/`: Main interactive storefront and admin interfaces.
 - `src/lib/store.ts`: Server functions, initial seed content, and database operations.
 - `src/lib/auth.ts`: ADMIN_PASSWORD check and signed session cookie helpers.
-- `src/lib/github.ts`: Uploads images to GitHub via the Contents API.
+- `src/lib/github.ts` / `src/lib/fotos.ts`: Upload and delete images (GitHub Contents API; `fotos.ts` would use an R2 binding `FOTOS` if one is ever added).
+- `src/lib/variants.ts`: Per-option price and stock (options like scent or size), shared by store, admin and server.
+- `src/lib/push.ts`: Web Push (hand-rolled WebCrypto) for the installable admin app «RC Admin» (`public/admin-sw.js`, `public/admin.webmanifest`).
+- `src/admin.css`: Admin styles, all scoped under `.rc-admin` (ported from JB Tech Store's panel with Ritual Cobre colors).
 - `src/lib/email.ts`: Sends the "new order" notification email via Resend.
 - `db/`: Drizzle Postgres schema and Neon client.
 - `db/migrations/`: Generated via `pnpm db:generate`, applied via `pnpm db:migrate` (needs `DATABASE_URL` in the environment).
@@ -25,6 +28,12 @@ Ritual Cobre is a TanStack Start ecommerce application deployed on Cloudflare Wo
 - Protect every administrative server mutation with `requireAdmin()` / `verifySession()`.
 - Generate a migration after every schema change with `pnpm db:generate`.
 - Preserve the terracotta, dusty rose, lavender, and ink visual direction unless the product owner requests a redesign.
+
+## Admin panel (ported from JB Tech Store, Sept 2026)
+
+- Tabs: Inicio, Productos, Pedidos, Finanzas, Clientes, Textos, Papelera. Includes FIFO purchase lots («Reponer»), manual sales, order editing with discounts, 30-day trash (products, orders, customers, images), per-option price/stock, Finanzas (business money / money to reinvest / owner's withdrawable), and push notifications for new orders.
+- New tables/columns are created automatically by `ensureSchema()` in `store.ts` (ALTER ... IF NOT EXISTS); no manual migration is needed. The old `products.slug` column is kept but no longer required.
+- Money is stored in cents; the currency comes from the `currency` content key (default DOP).
 
 ## Non-obvious Decisions
 

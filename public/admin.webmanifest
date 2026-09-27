@@ -1,0 +1,18 @@
+{
+  "id": "/admin",
+  "name": "Ritual Cobre · Admin",
+  "short_name": "RC Admin",
+  "description": "Panel de Ritual Cobre: pedidos, productos y finanzas, con aviso de cada pedido nuevo.",
+  "start_url": "/admin",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#182431",
+  "theme_color": "#182431",
+  "lang": "es",
+  "icons": [
+    { "src": "/admin-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/admin-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/admin-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

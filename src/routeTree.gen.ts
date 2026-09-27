@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PoliticasRouteImport } from './routes/politicas'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as FotosSplatRouteImport } from './routes/fotos/$'
 import { Route as ApiUploadRouteImport } from './routes/api/upload'
 
 const PoliticasRoute = PoliticasRouteImport.update({
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FotosSplatRoute = FotosSplatRouteImport.update({
+  id: '/fotos/$',
+  path: '/fotos/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiUploadRoute = ApiUploadRouteImport.update({
   id: '/api/upload',
   path: '/api/upload',
@@ -40,12 +46,14 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/politicas': typeof PoliticasRoute
   '/api/upload': typeof ApiUploadRoute
+  '/fotos/$': typeof FotosSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/politicas': typeof PoliticasRoute
   '/api/upload': typeof ApiUploadRoute
+  '/fotos/$': typeof FotosSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/politicas': typeof PoliticasRoute
   '/api/upload': typeof ApiUploadRoute
+  '/fotos/$': typeof FotosSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/politicas' | '/api/upload'
+  fullPaths: '/' | '/admin' | '/politicas' | '/api/upload' | '/fotos/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/politicas' | '/api/upload'
-  id: '__root__' | '/' | '/admin' | '/politicas' | '/api/upload'
+  to: '/' | '/admin' | '/politicas' | '/api/upload' | '/fotos/$'
+  id: '__root__' | '/' | '/admin' | '/politicas' | '/api/upload' | '/fotos/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +76,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   PoliticasRoute: typeof PoliticasRoute
   ApiUploadRoute: typeof ApiUploadRoute
+  FotosSplatRoute: typeof FotosSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -92,6 +102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/fotos/$': {
+      id: '/fotos/$'
+      path: '/fotos/$'
+      fullPath: '/fotos/$'
+      preLoaderRoute: typeof FotosSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/upload': {
       id: '/api/upload'
       path: '/api/upload'
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   PoliticasRoute: PoliticasRoute,
   ApiUploadRoute: ApiUploadRoute,
+  FotosSplatRoute: FotosSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

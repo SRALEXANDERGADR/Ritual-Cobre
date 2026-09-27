@@ -1,552 +1,1695 @@
-import { jsPDF } from 'jspdf'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { ChangeEvent, ComponentType, FormEvent, ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { TriangleAlert, ArrowLeft, ArrowUpRight, Boxes, CircleCheck, Download, Eye, EyeOff, FileText, ImagePlus, LayoutDashboard, LoaderCircle, LogOut, Mail, MessageCircle, PackagePlus, Pencil, Phone, ReceiptText, Save, Search, Share2, Star, Store, Trash2, TrendingUp, UserPlus, Users, X } from 'lucide-react'
-import { checkSession, deleteCustomer, deleteOrder, deleteProduct, getAdminData, login, logout, saveContent, saveCustomer, saveProduct, updateOrderStatus } from '@/lib/store'
-import { CURRENCIES, dateTime, escapeHtml, formatMoney, shortDate, toCents, whatsappLink } from '@/lib/format'
-import { BrandLogo, BrandMark } from '@/components/BrandMark'
+import {
+  AlertTriangle, Bell, BellOff, Check, ChevronLeft, Download, Layers, Smartphone, LayoutDashboard, ListOrdered, LogOut, Package,
+  Pencil, Plus, RotateCcw, Search, Share2, ShoppingBag, ShoppingCart, SlidersHorizontal, Trash2, Upload, Users, Wallet, X,
+} from 'lucide-react'
+import {
+  CATEGORIES, checkSession, deleteCustomer, deleteExpense, deleteOrder, deletePurchase, deleteProduct,
+  getAdminData, login, logout, purgeCustomer, purgeOrder, purgeProduct, recordExpense,
+  recordManualSale, recordPurchase, restoreCustomer, restoreOrder, restoreProduct, saveContent, saveCustomer,
+  saveProduct, splitPurchase, updateOrder, updateOrderStatus,
+  getPushSetup, removePushSubscription, savePushSubscription, sendTestPush,
+} from '@/lib/store'
+import { fromBase64Url } from '@/lib/push'
+import { CURRENCIES, formatMoney } from '@/lib/format'
+import {
+  hasOwnPrice, normalizeVariants, optionFromName, optionPrice, optionStock, parseOptions, priceRange, tracksOptionStock,
+} from '@/lib/variants'
+import type { ProductVariant } from '@/lib/variants'
 
-type Product = { id: number; name: string; category: string; description: string; price: number; stock: number; image: string; featured: boolean }
-type OrderItem = { productId?: number; name: string; price: number; quantity: number; image?: string }
-type Order = { id: number; orderNumber: string; customerId: number | null; customerName: string; email: string; phone: string; address: string; total: number; status: string; paymentStatus: string; items: OrderItem[]; createdAt: string | Date }
-type Customer = { id: number; name: string; email: string; phone: string; address: string; notes: string; createdAt: string | Date }
-type AdminData = { products: Product[]; orders: Order[]; customers: Customer[]; content: Record<string, string> }
-type Tab = 'resumen' | 'productos' | 'clientes' | 'pedidos' | 'contenido'
-type ProductDraft = { id?: number; name: string; category: string; description: string; price: string; stock: string; image: string; featured: boolean }
+// Moneda y nombre de la tienda: salen de «Textos» (se ponen al cargar el panel).
+let CURRENCY = 'DOP'
+let BRAND = 'Ritual Cobre'
+const money = (value: number) => formatMoney(value, CURRENCY)
+const dateFmt = (value: string) => new Intl.DateTimeFormat('es-DO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+const shortDate = (value: string) => new Intl.DateTimeFormat('es-DO', { day: '2-digit', month: 'short' }).format(new Date(value))
+
+type Product = { id: number; name: string; category: string; description: string; options: string; price: number; originalPrice: number; stock: number; cost: number; image: string; variantImages: ProductVariant[]; optionStock: boolean; featured: boolean; isNew: boolean; bestSeller: boolean; active: boolean; createdAt: string; deletedAt: string | null }
+type OrderItem = { id: number; name: string; price: number; quantity: number; cost: number; option?: string; reinvCost?: number; reinvQty?: number }
+type Order = { id: number; orderNumber: string; customerName: string; email: string; phone: string; address: string; items: OrderItem[]; discount: number; total: number; status: string; paymentStatus: string; notes: string; createdAt: string; deletedAt: string | null }
+type Customer = { id: number; name: string; email: string; phone: string; address: string; notes: string; createdAt: string; deletedAt: string | null }
+type ImageTrashRow = { id: number; path: string; url: string; reason: string; deletedAt: string }
+type Fund = 'capital' | 'reinversion'
+type Purchase = { id: number; productId: number; productName: string; option: string; fund: Fund; quantity: number; unitCost: number; totalCost: number; remainingQuantity: number; notes: string; createdAt: string }
+type Expense = { id: number; type: 'negocio' | 'personal'; description: string; amount: number; createdAt: string }
+type AdminData = { products: Product[]; orders: Order[]; customers: Customer[]; content: Record<string, string>; purchases: Purchase[]; expenses: Expense[]; trash: { products: Product[]; orders: Order[]; customers: Customer[]; images: ImageTrashRow[] } }
+
+/** Una opción (color/diseño/modelo) mientras se edita el producto. `key`
+ * no cambia aunque se le cambie el nombre, y `originalName` es el nombre
+ * que tenía guardado — así sus compras la siguen si se renombra. */
+type OptionDraft = { key: string; name: string; originalName: string; image: string; description: string; price: string; stock: string }
+type ProductDraft = { id?: number; name: string; category: string; description: string; price: string; originalPrice: string; stock: string; image: string; optionStock: boolean; options: OptionDraft[]; featured: boolean; isNew: boolean; bestSeller: boolean; active: boolean }
 type CustomerDraft = { id?: number; name: string; email: string; phone: string; address: string; notes: string }
-type Toast = { kind: 'ok' | 'error'; message: string } | null
+type PurchaseLine = { option: string; quantity: string; unitCost: string }
+type PurchaseDraft = { productId: string; notes: string; lines: PurchaseLine[]; sameCost: string; fund: Fund }
+type ExpenseDraft = { type: 'negocio' | 'personal'; description: string; amount: string }
+type SaleLine = { productId: string; option: string; quantity: string; price: string }
+type SaleDraft = { customerName: string; phone: string; notes: string; paymentStatus: string; lines: SaleLine[] }
+type SplitDraft = { purchase: Purchase; parts: Record<string, string> }
+type LotStatus = 'ahora' | 'espera' | 'vendido'
 
-const ORDER_STATUSES = ['Pendiente', 'Preparando', 'Enviado', 'Entregado', 'Cancelado']
-const PAYMENT_STATUSES = ['Pendiente', 'Pagado', 'Reembolsado']
-const LOW_STOCK = 5
-const blankProduct: ProductDraft = { name: '', category: '', description: '', price: '', stock: '0', image: '', featured: false }
-const blankCustomer: CustomerDraft = { name: '', email: '', phone: '', address: '', notes: '' }
-const errorText = (error: unknown, fallback: string) => error instanceof Error && error.message ? error.message : fallback
-const statusClass = (status: string) => `status-pill status-${status.toLowerCase()}`
+type CatalogFilter = 'todos' | 'agotados' | 'bajo' | 'sincosto' | 'ocultos'
+const CATALOG_FILTERS: Array<{ id: CatalogFilter; label: string }> = [
+  { id: 'todos', label: 'Todos' },
+  { id: 'agotados', label: 'Agotados' },
+  { id: 'bajo', label: 'Quedan pocos' },
+  { id: 'sincosto', label: 'Sin costo' },
+  { id: 'ocultos', label: 'Ocultos' },
+]
+type Tab = 'resumen' | 'finanzas' | 'catalogo' | 'pedidos' | 'clientes' | 'contenido' | 'papelera'
+
+const ORDER_STATUSES = ['Pendiente', 'Confirmado', 'Preparando', 'Enviado', 'Entregado', 'Cancelado']
+const PAYMENT_STATUSES = ['Pendiente', 'Pagado']
+
+let keySeq = 0
+const newKey = () => `op-${Date.now().toString(36)}-${(keySeq++).toString(36)}`
+const cents = (value: string) => Math.round(Number(value || 0) * 100)
+const toMoneyInput = (value: number) => (value ? String(value / 100) : '')
+
+function emptyOption(): OptionDraft {
+  return { key: newKey(), name: '', originalName: '', image: '', description: '', price: '', stock: '0' }
+}
+
+function emptyDraft(): ProductDraft {
+  return { name: '', category: CATEGORIES[0], description: '', price: '', originalPrice: '', stock: '0', image: '', optionStock: true, options: [], featured: false, isNew: false, bestSeller: false, active: true }
+}
+
+function toDraft(product: Product): ProductDraft {
+  return {
+    id: product.id, name: product.name, category: product.category, description: product.description,
+    price: String(product.price / 100), originalPrice: toMoneyInput(product.originalPrice), stock: String(product.stock), image: product.image,
+    optionStock: Boolean(product.optionStock),
+    options: normalizeVariants(product).map((entry) => ({ key: newKey(), name: entry.option, originalName: entry.option, image: entry.image, description: entry.description, price: toMoneyInput(entry.price ?? 0), stock: String(entry.stock ?? 0) })),
+    featured: product.featured, isNew: product.isNew, bestSeller: product.bestSeller, active: product.active,
+  }
+}
+
+function purchaseDraftFor(product?: Product): PurchaseDraft {
+  const lines = product && tracksOptionStock(product)
+    ? parseOptions(product.options).map((option) => ({ option, quantity: '', unitCost: '' }))
+    : [{ option: '', quantity: '1', unitCost: '' }]
+  return { productId: product ? String(product.id) : '', notes: '', lines, sameCost: '', fund: 'capital' }
+}
+
+const FUND_LABEL: Record<Fund, string> = { capital: 'Dinero del negocio', reinversion: 'Dinero para reinvertir' }
+
+function emptyExpenseDraft(): ExpenseDraft {
+  return { type: 'negocio', description: '', amount: '' }
+}
+
+/** Primera opción que se puede vender (si lleva cantidad por opción, la
+ * primera que tenga unidades). */
+function firstSellableOption(product: Product) {
+  const options = parseOptions(product.options)
+  if (!tracksOptionStock(product)) return options[0] ?? ''
+  return options.find((option) => optionStock(product, option) > 0) ?? options[0] ?? ''
+}
+
+function emptySaleLine(product?: Product): SaleLine {
+  const option = product ? firstSellableOption(product) : ''
+  return { productId: product ? String(product.id) : '', option, quantity: '1', price: product ? String(optionPrice(product, option) / 100) : '' }
+}
+
+const byFifo = (a: Purchase, b: Purchase) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id - b.id
+
+/** En qué turno está cada lote: "ahora" = el próximo del que va a salir
+ * una venta; "espera" = le toca después; "vendido" = ya no le queda nada.
+ * En un producto con cantidad por opción, cada opción tiene su propia fila
+ * (sus lotes + los lotes generales sin opción). */
+function lotStatuses(lots: Purchase[], product: Product | undefined): Map<number, LotStatus> {
+  const statuses = new Map<number, LotStatus>()
+  const tracking = product ? tracksOptionStock(product) : false
+  for (const lot of lots) {
+    if (lot.remainingQuantity <= 0) { statuses.set(lot.id, 'vendido'); continue }
+    const pool = lots
+      .filter((other) => other.remainingQuantity > 0 && (!tracking || (lot.option ? other.option === lot.option || other.option === '' : other.option === '')))
+      .sort(byFifo)
+    statuses.set(lot.id, pool[0]?.id === lot.id ? 'ahora' : 'espera')
+  }
+  return statuses
+}
+
+/** Costo del próximo lote que va a salir para esa opción (o del producto). */
+function nextLotFor(lots: Purchase[], product: Product, option: string): Purchase | undefined {
+  const tracking = tracksOptionStock(product)
+  return lots
+    .filter((lot) => lot.remainingQuantity > 0 && (!tracking || !option || lot.option === option || lot.option === ''))
+    .sort(byFifo)[0]
+}
+
+const STATUS_LABEL: Record<LotStatus, string> = { ahora: 'Se vende ahora', espera: 'En espera', vendido: 'Vendido completo' }
+
+function LotRow({ lot, status, showProduct, general, busy, onDelete, onSplit }: { lot: Purchase; status: LotStatus; showProduct?: boolean; general?: boolean; busy: boolean; onDelete: () => void; onSplit?: () => void }) {
+  const sold = lot.quantity - lot.remainingQuantity
+  const percent = lot.quantity > 0 ? Math.round((sold / lot.quantity) * 100) : 0
+  return (
+    <div className={`lot-row lot-${status}`}>
+      <div className="lot-row-top">
+        <div className="lot-row-title">
+          {showProduct && <strong>{lot.productName}</strong>}
+          {lot.option ? <span className="lot-option">{lot.option}</span> : general ? <span className="lot-option lot-option-general">Sin opción</span> : null}
+          {lot.fund === 'reinversion' && <span className="lot-option lot-fund" title="Se pagó con el dinero para reinvertir">Reinversión</span>}
+        </div>
+        <span className={`lot-badge lot-badge-${status}`}>{STATUS_LABEL[status]}</span>
+      </div>
+      <p className="lot-row-numbers"><b>{lot.quantity} × {money(lot.unitCost)}</b> = {money(lot.totalCost)} · {shortDate(lot.createdAt)}</p>
+      <div className="lot-bar" aria-hidden="true"><span style={{ width: `${percent}%` }} /></div>
+      <p className="lot-row-foot">
+        {sold <= 0 ? `Nada vendido todavía · quedan ${lot.remainingQuantity}` : lot.remainingQuantity > 0 ? `Vendidas ${sold} · quedan ${lot.remainingQuantity}` : `Se vendieron las ${lot.quantity}`}
+        {lot.notes ? ` · ${lot.notes}` : ''}
+      </p>
+      {(onSplit || lot.remainingQuantity > 0) && (
+        <div className="lot-row-actions">
+          {onSplit && <button type="button" disabled={busy} onClick={onSplit}><SlidersHorizontal size={14} />Repartir entre opciones</button>}
+          {lot.remainingQuantity > 0 && <button type="button" className="danger" disabled={busy} onClick={onDelete} title="Eliminar compra (si se registró mal)"><Trash2 size={14} />Borrar</button>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Collapsible({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
+  return <details className="admin-details" open={defaultOpen}><summary>{title}</summary><div className="admin-details-body">{children}</div></details>
+}
+
+/** Carga jsPDF desde CDN la primera vez que hace falta (al ver/descargar
+ * una factura), igual que el recibo del cliente carga html2canvas — así
+ * no toca instalarlo como dependencia local. */
+let jsPdfPromise: Promise<any> | null = null
+function loadJsPdf(): Promise<any> {
+  const existing = (window as any).jspdf
+  if (existing) return Promise.resolve(existing.jsPDF)
+  if (!jsPdfPromise) {
+    jsPdfPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'
+      script.onload = () => resolve((window as any).jspdf.jsPDF)
+      script.onerror = () => reject(new Error('No se pudo cargar el generador de PDF.'))
+      document.head.appendChild(script)
+    })
+  }
+  return jsPdfPromise
+}
+
+function buildInvoiceDoc(JsPDF: any, order: Order) {
+  const doc = new JsPDF({ unit: 'pt', format: 'a4' })
+  const today = dateFmt(order.createdAt)
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(24, 36, 49)
+  doc.text(BRAND.toUpperCase(), 40, 50)
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(100)
+  doc.text('Factura de pedido', 40, 68)
+  doc.setDrawColor(220); doc.line(40, 82, 555, 82)
+
+  doc.setFontSize(11); doc.setTextColor(30)
+  doc.text(`Pedido: ${order.orderNumber}`, 40, 104)
+  doc.text(`Fecha: ${today}`, 40, 120)
+  doc.text(`Cliente: ${order.customerName}`, 40, 142)
+  doc.text(`Teléfono: ${order.phone || '-'}`, 40, 158)
+  if (order.address) doc.text(`Dirección: ${order.address}`, 40, 174, { maxWidth: 400 })
+
+  let y = 205
+  doc.setFont('helvetica', 'bold')
+  doc.text('Producto', 40, y); doc.text('Cant.', 400, y); doc.text('Precio', 555, y, { align: 'right' })
+  y += 6; doc.setDrawColor(220); doc.line(40, y, 555, y); y += 18
+  doc.setFont('helvetica', 'normal')
+  for (const item of order.items) {
+    doc.text(item.name, 40, y, { maxWidth: 330 })
+    doc.text(String(item.quantity), 400, y)
+    doc.text(money(item.price * item.quantity), 555, y, { align: 'right' })
+    y += 22
+  }
+  y += 8; doc.setDrawColor(220); doc.line(40, y, 555, y); y += 24
+  if (order.discount > 0) {
+    const subtotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(30)
+    doc.text('Subtotal', 40, y); doc.text(money(subtotal), 555, y, { align: 'right' }); y += 18
+    doc.text('Descuento', 40, y); doc.text(`-${money(order.discount)}`, 555, y, { align: 'right' }); y += 22
+  }
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13)
+  doc.text('Total', 40, y); doc.text(money(order.total), 555, y, { align: 'right' })
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(140)
+  doc.text(`Gracias por comprar en ${BRAND}.`, 40, y + 40)
+  return doc
+}
+
+type ContentField = { key: string; label: string; type?: 'textarea' | 'select' | 'image'; options?: Array<{ value: string; label: string }> }
+const CONTENT_GROUPS: Array<{ title: string; hint?: string; fields: ContentField[] }> = [
+  { title: 'Marca', fields: [
+    { key: 'brandName', label: 'Nombre de la tienda' },
+    { key: 'footerText', label: 'Frase del pie de página', type: 'textarea' },
+    { key: 'currency', label: 'Moneda de los precios', type: 'select', options: CURRENCIES.map((item) => ({ value: item.code, label: item.label })) },
+  ] },
+  { title: 'Nuestra historia', hint: 'La sección con la foto inclinada, antes del pie de página.', fields: [
+    { key: 'storyTitle', label: 'Título' },
+    { key: 'storyText', label: 'Texto', type: 'textarea' },
+    { key: 'storyImage', label: 'Foto', type: 'image' },
+  ] },
+  { title: 'Contacto y redes', fields: [
+    { key: 'whatsapp', label: 'WhatsApp (con código de país, ej. 18495551234)' },
+    { key: 'contactEmail', label: 'Correo de contacto' },
+    { key: 'instagram', label: 'Usuario de Instagram' },
+    { key: 'schedule', label: 'Horario de atención' },
+    { key: 'notificationEmail', label: 'Correo para avisos de pedidos (opcional, no se muestra en la tienda)' },
+  ] },
+  { title: 'Menú y carrito', fields: [
+    { key: 'navCatalog', label: 'Menú: catálogo' },
+    { key: 'navContact', label: 'Menú: contacto' },
+    { key: 'cartTitle', label: 'Título del carrito' },
+    { key: 'checkoutTitle', label: 'Título al completar el pedido' },
+  ] },
+  { title: 'Políticas', hint: 'Se ven en la página de Políticas (enlace en el pie de página).', fields: [
+    { key: 'policiesUpdated', label: 'Fecha de la última actualización' },
+    { key: 'policyPrivacy', label: 'Privacidad', type: 'textarea' },
+    { key: 'policyOrders', label: 'Pedidos y pagos', type: 'textarea' },
+    { key: 'policyShipping', label: 'Envíos', type: 'textarea' },
+    { key: 'policyReturns', label: 'Cambios y devoluciones', type: 'textarea' },
+    { key: 'policyTerms', label: 'Términos', type: 'textarea' },
+    { key: 'policyContact', label: 'Contacto', type: 'textarea' },
+  ] },
+]
+
+/** Achica la foto en el teléfono ANTES de subirla: máximo 1600 px de lado
+ * y formato WebP (~85% calidad). Una foto de cámara de 4–6 MB queda en
+ * ~200–400 KB: sube mucho más rápido y la tienda carga más rápido para
+ * los clientes. Si el navegador no puede procesarla, se sube la original. */
+async function compressImage(file: File): Promise<File> {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const MAX = 1600
+    const scale = Math.min(1, MAX / Math.max(bitmap.width, bitmap.height))
+    if (scale === 1 && file.size < 400_000) { bitmap.close(); return file }
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bitmap.width * scale)
+    canvas.height = Math.round(bitmap.height * scale)
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close()
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85))
+    if (!blob || blob.type !== 'image/webp' || blob.size >= file.size) return file
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.webp', { type: 'image/webp' })
+  } catch {
+    return file
+  }
+}
+
+async function uploadFile(original: File): Promise<string> {
+  const file = await compressImage(original)
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch('/api/upload', { method: 'POST', body: form })
+  const result = (await response.json()) as { url?: string; error?: string }
+  if (!response.ok || !result.url) throw new Error(result.error || 'No pudimos subir la imagen.')
+  return result.url
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// APP Y NOTIFICACIONES — instalar el panel como app ("RC Admin") y
+// activar el aviso de cada pedido nuevo en este teléfono o computadora.
+// ───────────────────────────────────────────────────────────────────────
+type PushState = 'cargando' | 'no-soportado' | 'bloqueado' | 'apagado' | 'activo'
+type PushDevice = { id: number; endpoint: string; label: string; createdAt: string }
+type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> }
+
+function deviceLabel() {
+  const ua = navigator.userAgent
+  const system = /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iPhone' : /Windows/i.test(ua) ? 'Windows' : /Mac/i.test(ua) ? 'Mac' : 'Computadora'
+  const browser = /SamsungBrowser/i.test(ua) ? 'Samsung Internet' : /Edg\//i.test(ua) ? 'Edge' : /Firefox/i.test(ua) ? 'Firefox' : /Chrome/i.test(ua) ? 'Chrome' : 'Navegador'
+  return `${system} · ${browser}`
+}
+
+// Chrome avisa "se puede instalar" con el evento beforeinstallprompt. Se
+// guarda aquí (y se evita su cartelito automático) para que la única forma
+// de instalar sea el botón «Instalar app» del panel, ya con la sesión abierta.
+let deferredInstall: InstallPromptEvent | null = null
+const installListeners = new Set<(event: InstallPromptEvent | null) => void>()
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (event) => {
+    if (!window.location.pathname.startsWith('/admin')) return
+    event.preventDefault()
+    deferredInstall = event as InstallPromptEvent
+    installListeners.forEach((listener) => listener(deferredInstall))
+  })
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null
+    installListeners.forEach((listener) => listener(null))
+  })
+}
+
+/** Pone (o quita) el manifest de la app "RC Admin" en la página. Solo se
+ * pone con la sesión abierta. */
+function setAdminManifest(enabled: boolean) {
+  const existing = document.getElementById('admin-manifest')
+  if (enabled && !existing) {
+    const link = document.createElement('link')
+    link.id = 'admin-manifest'
+    link.rel = 'manifest'
+    link.href = '/admin.webmanifest'
+    document.head.appendChild(link)
+  } else if (!enabled && existing) {
+    existing.remove()
+  }
+}
+
+function isInstalledApp() {
+  return typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true)
+}
+
+function AppAndNotifications() {
+  const [state, setState] = useState<PushState>('cargando')
+  const [devices, setDevices] = useState<PushDevice[]>([])
+  const [endpoint, setEndpoint] = useState('')
+  const [working, setWorking] = useState(false)
+  const [message, setMessage] = useState('')
+  const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(() => deferredInstall)
+  const [installed, setInstalled] = useState(false)
+
+  async function load() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { setState('no-soportado'); return }
+    const registration = await navigator.serviceWorker.register('/admin-sw.js', { scope: '/admin' })
+    const setup = await getPushSetup()
+    setDevices(setup.devices as unknown as PushDevice[])
+    const subscription = await registration.pushManager.getSubscription()
+    setEndpoint(subscription?.endpoint ?? '')
+    if (Notification.permission === 'denied') setState('bloqueado')
+    else if (subscription && setup.devices.some((device) => device.endpoint === subscription.endpoint)) setState('activo')
+    else setState('apagado')
+  }
+
+  useEffect(() => {
+    setInstalled(isInstalledApp())
+    load().catch(() => setState('no-soportado'))
+    setInstallEvent(deferredInstall)
+    const listener = (event: InstallPromptEvent | null) => {
+      setInstallEvent(event)
+      if (!event) setInstalled(true)
+    }
+    installListeners.add(listener)
+    return () => { installListeners.delete(listener) }
+  }, [])
+
+  async function run(action: () => Promise<void>) {
+    setWorking(true)
+    setMessage('')
+    try { await action() } catch (caught) { setMessage(caught instanceof Error ? caught.message : 'Algo salió mal. Intenta de nuevo.') } finally { setWorking(false) }
+  }
+
+  const enable = () => run(async () => {
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      setState(permission === 'denied' ? 'bloqueado' : 'apagado')
+      throw new Error('Para recibir los pedidos tienes que tocar «Permitir» cuando el teléfono pregunte.')
+    }
+    const registration = await navigator.serviceWorker.register('/admin-sw.js', { scope: '/admin' })
+    await navigator.serviceWorker.ready
+    const setup = await getPushSetup()
+    // Si había una suscripción vieja (ej. de otras claves), se cambia por una nueva.
+    const old = await registration.pushManager.getSubscription()
+    if (old) await old.unsubscribe().catch(() => false)
+    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromBase64Url(setup.publicKey) })
+    const json = subscription.toJSON()
+    await savePushSubscription({ data: { endpoint: subscription.endpoint, p256dh: json.keys?.p256dh ?? '', auth: json.keys?.auth ?? '', label: deviceLabel() } })
+    try {
+      await sendTestPush({ data: subscription.endpoint })
+    } finally {
+      await load() // la pantalla siempre muestra el estado real, aunque la prueba falle
+    }
+    setMessage('Listo. Te acaba de llegar una notificación de prueba: así te van a llegar los pedidos.')
+  })
+
+  const disable = () => run(async () => {
+    const registration = await navigator.serviceWorker.getRegistration('/admin')
+    const subscription = await registration?.pushManager.getSubscription()
+    if (subscription) {
+      await removePushSubscription({ data: subscription.endpoint })
+      await subscription.unsubscribe().catch(() => false)
+    }
+    await load()
+    setMessage('Notificaciones apagadas en este aparato.')
+  })
+
+  const test = () => run(async () => {
+    try {
+      await sendTestPush({ data: endpoint })
+    } finally {
+      await load()
+    }
+    setMessage('Prueba enviada. Debe llegarte en unos segundos.')
+  })
+
+  const removeDevice = (device: PushDevice) => run(async () => {
+    if (!window.confirm(`¿Dejar de mandar avisos a «${device.label || 'ese aparato'}»?`)) return
+    await removePushSubscription({ data: device.endpoint })
+    await load()
+  })
+
+  const install = () => run(async () => {
+    if (!installEvent) return
+    await installEvent.prompt()
+    const choice = await installEvent.userChoice
+    if (choice.outcome === 'accepted') setInstalled(true)
+    deferredInstall = null
+    setInstallEvent(null)
+  })
+
+  return (
+    <div className="app-card">
+      <div className="app-card-head">
+        <img src="/admin-192.png" alt="" />
+        <div><strong>App y avisos de pedidos</strong><span>Instala el panel como app y te llega una notificación (con el punto en el ícono) cada vez que un cliente hace un pedido, aunque la app esté cerrada.</span></div>
+      </div>
+
+      <div className="app-step">
+        <b>1</b>
+        <div>
+          <strong>Instalar la app</strong>
+          {installed
+            ? <span className="app-ok"><Check size={14} />Ya la estás usando como app.</span>
+            : installEvent
+            ? <button type="button" className="primary-button" disabled={working} onClick={install}><Smartphone size={16} />Instalar app</button>
+            : <span>Preparando el botón de instalar… Si en unos segundos no aparece, en Chrome toca el menú <b>⋮</b> → <b>«Instalar app»</b> (en la PC, el ícono de instalar en la barra de dirección).</span>}
+        </div>
+      </div>
+
+      <div className="app-step">
+        <b>2</b>
+        <div>
+          <strong>Avisos en este aparato</strong>
+          {state === 'cargando' && <span>Revisando…</span>}
+          {state === 'no-soportado' && <span>Este navegador no puede recibir notificaciones. Abre el panel en Chrome (Android o PC) o en Edge.</span>}
+          {state === 'bloqueado' && <span className="app-warn">Las notificaciones están bloqueadas para esta página. Toca el candado junto a la dirección (o Ajustes del teléfono → Apps → RC Admin → Notificaciones) y ponlas en «Permitir»; luego vuelve aquí.</span>}
+          {state === 'apagado' && <button type="button" className="primary-button" disabled={working} onClick={enable}><Bell size={16} />{working ? 'Activando…' : 'Activar notificaciones'}</button>}
+          {state === 'activo' && <div className="app-actions">
+            <span className="app-ok"><Check size={14} />Activadas en este aparato.</span>
+            <button type="button" className="ghost-button" disabled={working} onClick={test}><Bell size={15} />Probar</button>
+            <button type="button" className="ghost-button" disabled={working} onClick={disable}><BellOff size={15} />Apagar</button>
+          </div>}
+        </div>
+      </div>
+
+      {message && <p className="app-message">{message}</p>}
+
+      {devices.length > 0 && (
+        <div className="app-devices">
+          <span>Los pedidos avisan a {devices.length === 1 ? '1 aparato' : `${devices.length} aparatos`}:</span>
+          {devices.map((device) => (
+            <div key={device.id} className="app-device">
+              <Smartphone size={15} />
+              <span>{device.label || 'Aparato'}{device.endpoint === endpoint ? ' (este)' : ''} · desde {shortDate(device.createdAt)}</span>
+              <button type="button" aria-label="Quitar" disabled={working} onClick={() => removeDevice(device)}><X size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function daysLeft(deletedAt: string) {
+  const elapsed = Date.now() - new Date(deletedAt).getTime()
+  return Math.max(0, 30 - Math.floor(elapsed / 86400000))
+}
 
 export function AdminPanel() {
-  const initialized = useRef(false)
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
+  const [password, setPassword] = useState('')
   const [data, setData] = useState<AdminData | null>(null)
   const [tab, setTab] = useState<Tab>('resumen')
   const [query, setQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('Todos')
-  const [categoryFilter, setCategoryFilter] = useState('Todas')
-  const [loginError, setLoginError] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [uploading, setUploading] = useState<string | null>(null)
-  const [toast, setToast] = useState<Toast>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadingVariant, setUploadingVariant] = useState<string | null>(null)
   const [editing, setEditing] = useState<ProductDraft | null>(null)
   const [editingCustomer, setEditingCustomer] = useState<CustomerDraft | null>(null)
-  const [viewingOrderId, setViewingOrderId] = useState<number | null>(null)
   const [contentDraft, setContentDraft] = useState<Record<string, string>>({})
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
-  const currency = data?.content.currency || 'USD'
-  const money = (value: number) => formatMoney(value, currency)
-
-  function notify(kind: 'ok' | 'error', message: string) {
-    setToast({ kind, message })
-    clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), kind === 'ok' ? 2800 : 6000)
-  }
+  const [editingPurchase, setEditingPurchase] = useState<PurchaseDraft | null>(null)
+  const [editingExpense, setEditingExpense] = useState<ExpenseDraft | null>(null)
+  const [editingOrder, setEditingOrder] = useState<{ id: number; customerName: string; email: string; phone: string; address: string; notes: string; items: OrderItem[]; discount: number } | null>(null)
+  const [financeSettings, setFinanceSettings] = useState({ capitalInicial: '0', reinvestPercent: '70' })
+  const [purchaseQuery, setPurchaseQuery] = useState('')
+  const [purchaseLimit, setPurchaseLimit] = useState(15)
+  const [expenseLimit, setExpenseLimit] = useState(15)
+  const [financeView, setFinanceView] = useState<'compras' | 'gastos'>('compras')
+  const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>('todos')
+  const [catalogCategory, setCatalogCategory] = useState('')
+  const [saleDraft, setSaleDraft] = useState<SaleDraft | null>(null)
+  const [lotsProductId, setLotsProductId] = useState<number | null>(null)
+  const [splitDraft, setSplitDraft] = useState<SplitDraft | null>(null)
+  const [pendingRestock, setPendingRestock] = useState<number | null>(null)
+  const [notice, setNotice] = useState('')
+  const [uploadingContent, setUploadingContent] = useState('')
 
   async function refresh() {
-    const result = await getAdminData()
-    setData(result as unknown as AdminData)
-    setContentDraft(result.content)
+    const adminData = await getAdminData()
+    CURRENCY = adminData.content.currency || 'DOP'
+    BRAND = adminData.content.brandName || 'Ritual Cobre'
+    setData(adminData as unknown as AdminData)
+    setContentDraft(adminData.content)
+    setFinanceSettings({
+      capitalInicial: String(Number(adminData.content.capitalInicial || 0) / 100),
+      reinvestPercent: String(Number(adminData.content.reinvestPercent ?? 70)),
+    })
   }
 
-  // Ejecuta una acción del panel con manejo uniforme de errores y avisos.
-  async function run(action: () => Promise<unknown>, success?: string, fallback = 'No pudimos completar la acción.') {
-    setBusy(true)
+  useEffect(() => {
+    checkSession().then(async (ok) => {
+      setAuthenticated(ok)
+      if (ok) await refresh().catch((caught) => setError(caught instanceof Error ? caught.message : 'No pudimos cargar los datos.'))
+    })
+  }, [])
+
+  // Solo con la sesión abierta se ofrece instalar el panel como app.
+  useEffect(() => { setAdminManifest(authenticated === true) }, [authenticated])
+
+  // La notificación de un pedido abre /admin?tab=pedidos. Y al abrir o
+  // volver a la app se quitan el punto del ícono y las notificaciones ya vistas.
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('tab')
+    if (wanted && ['resumen', 'finanzas', 'catalogo', 'pedidos', 'clientes', 'contenido', 'papelera'].includes(wanted)) setTab(wanted as Tab)
+    const clearBadge = () => {
+      if (document.visibilityState !== 'visible') return
+      try { (navigator as any).clearAppBadge?.()?.catch?.(() => {}) } catch { /* sin soporte */ }
+      navigator.serviceWorker?.getRegistration('/admin').then((registration) => registration?.getNotifications().then((list) => list.forEach((item) => item.close()))).catch(() => {})
+    }
+    clearBadge()
+    document.addEventListener('visibilitychange', clearBadge)
+    return () => document.removeEventListener('visibilitychange', clearBadge)
+  }, [])
+
+  // Recién creado un producto, se abre de una vez «Reponer» para registrar
+  // cuántas unidades se compraron y a cuánto (un producto nuevo empieza en 0).
+  useEffect(() => {
+    if (!pendingRestock || !data) return
+    const product = data.products.find((item) => item.id === pendingRestock)
+    if (product) {
+      setEditingPurchase(purchaseDraftFor(product))
+      setNotice(`«${product.name}» quedó guardado. Ahora registra cuántas compraste y a cuánto cada una.`)
+    }
+    setPendingRestock(null)
+  }, [pendingRestock, data])
+
+  async function handleContentImage(key: string, event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setUploadingContent(key)
+    setError('')
     try {
-      await action()
-      await refresh()
-      if (success) notify('ok', success)
-      return true
+      const url = await uploadFile(file)
+      setContentDraft((current) => ({ ...current, [key]: url }))
+      setNotice('Foto subida. Toca «Guardar cambios» para que se vea en la tienda.')
     } catch (caught) {
-      const message = errorText(caught, fallback)
-      if (/sesión/i.test(message)) setAuthenticated(false)
-      notify('error', message)
-      return false
+      setError(caught instanceof Error ? caught.message : 'No pudimos subir la foto.')
+    } finally {
+      setUploadingContent('')
+    }
+  }
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await login({ data: { password } })
+      setAuthenticated(true)
+      await refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos iniciar sesión.')
     } finally {
       setBusy(false)
     }
   }
 
-  useEffect(() => {
-    if (initialized.current) return
-    initialized.current = true
-    ;(async () => {
-      try {
-        const ok = await checkSession()
-        setAuthenticated(Boolean(ok))
-        if (ok) await refresh()
-      } catch (caught) {
-        setLoginError(errorText(caught, 'No pudimos verificar tu sesión.'))
-        setAuthenticated(false)
-      }
-    })()
-  }, [])
-
-  // Cierra ventanas con Escape.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || busy) return
-      setEditing(null); setEditingCustomer(null); setViewingOrderId(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [busy])
-
-  async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setLoginError('')
-    const form = new FormData(event.currentTarget)
-    try { await login({ data: { password: String(form.get('password')) } }); setAuthenticated(true); await refresh() }
-    catch (caught) { setLoginError(errorText(caught, 'No pudimos completar el acceso.')) }
-    finally { setBusy(false) }
-  }
-
   async function handleLogout() {
-    try { await logout() } finally { setAuthenticated(false); setData(null) }
+    await logout()
+    setAuthenticated(false)
+    setData(null)
   }
 
-  async function handleProduct(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!editing) return
-    const draft = editing
-    const ok = await run(() => saveProduct({ data: { id: draft.id, name: draft.name, category: draft.category, description: draft.description, image: draft.image, featured: draft.featured, price: toCents(draft.price), stock: Math.max(0, Math.floor(Number(draft.stock) || 0)) } }), draft.id ? 'Producto actualizado.' : 'Producto creado.', 'No pudimos guardar el producto.')
-    if (ok) setEditing(null)
-  }
-
-  async function handleCustomer(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!editingCustomer) return
-    const draft = editingCustomer
-    const ok = await run(() => saveCustomer({ data: draft }), draft.id ? 'Cliente actualizado.' : 'Cliente registrado.', 'No pudimos guardar el cliente.')
-    if (ok) setEditingCustomer(null)
-  }
-
-  async function uploadImage(file: File, target: string) {
-    setUploading(target)
+  async function withBusy(action: () => Promise<unknown>) {
+    setBusy(true)
+    setError('')
     try {
-      const body = new FormData(); body.append('file', file)
-      const response = await fetch('/api/upload', { method: 'POST', body })
-      const result = await response.json().catch(() => ({})) as { url?: string; error?: string }
-      if (!response.ok || !result.url) throw new Error(result.error || 'No pudimos subir la imagen.')
-      if (target === 'product') setEditing((current) => current ? { ...current, image: result.url! } : current)
-      else setContentDraft((current) => ({ ...current, [target]: result.url! }))
-      notify('ok', target === 'product' ? 'Imagen lista. Guarda el producto para aplicarla.' : 'Imagen lista. Pulsa «Guardar cambios» para publicarla.')
-    } catch (caught) { notify('error', errorText(caught, 'No pudimos subir la imagen.')) }
-    finally { setUploading(null) }
+      await action()
+      await refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Ocurrió un error inesperado.')
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const q = query.trim().toLowerCase()
-  const categories = useMemo(() => Array.from(new Set((data?.products ?? []).map((product) => product.category))).sort((a, b) => a.localeCompare(b, 'es')), [data])
-  const filteredProducts = useMemo(() => (data?.products ?? []).filter((product) => (categoryFilter === 'Todas' || product.category === categoryFilter) && (!q || product.name.toLowerCase().includes(q) || product.category.toLowerCase().includes(q))), [data, q, categoryFilter])
-  const filteredCustomers = useMemo(() => (data?.customers ?? []).filter((customer) => !q || customer.name.toLowerCase().includes(q) || customer.email.toLowerCase().includes(q) || customer.phone.toLowerCase().includes(q)), [data, q])
-  const filteredOrders = useMemo(() => (data?.orders ?? []).filter((order) => (statusFilter === 'Todos' || order.status === statusFilter || (statusFilter === 'Por cobrar' && order.paymentStatus === 'Pendiente' && order.status !== 'Cancelado')) && (!q || order.orderNumber.toLowerCase().includes(q) || order.customerName.toLowerCase().includes(q) || order.email.toLowerCase().includes(q) || order.phone.includes(q))), [data, q, statusFilter])
+  // ─── Producto: guardar y opciones ───
+  function updateOption(key: string, patch: Partial<OptionDraft>) {
+    setEditing((current) => current && { ...current, options: current.options.map((option) => (option.key === key ? { ...option, ...patch } : option)) })
+  }
 
-  if (authenticated === null) return <div className="admin-loading"><LoaderCircle/><p>Preparando tu espacio...</p></div>
-  if (!authenticated) return <div className="admin-login"><div className="login-art"><Link to="/"><ArrowLeft/> Volver a la tienda</Link><BrandMark className="login-mark"/><p>El detrás de escena de cada ritual.</p></div><div className="login-form-wrap"><div><BrandLogo className="login-logo"/><span>ACCESO PRIVADO</span><h1>Panel de<br/>administración</h1><p>Ingresa la contraseña de administración para gestionar pedidos, productos y contenido.</p><form onSubmit={handleLogin}><label>Contraseña<div className="password-field"><input required type={showPassword ? 'text' : 'password'} name="password" placeholder="••••••••" autoComplete="current-password" autoFocus/><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}>{showPassword ? <EyeOff/> : <Eye/>}</button></div></label>{loginError && <p className="form-error" role="alert">{loginError}</p>}<button className="primary-button full" disabled={busy}>{busy ? 'Ingresando...' : 'Entrar al panel'}</button></form></div></div></div>
+  function removeOption(key: string) {
+    setEditing((current) => current && { ...current, options: current.options.filter((option) => option.key !== key) })
+  }
 
-  if (!data) return <div className="admin-loading"><LoaderCircle/><p>Cargando información...</p></div>
+  async function handleSaveProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editing) return
+    // Las opciones se guardan separadas por coma, así que una coma dentro
+    // del nombre lo partiría en dos: se cambia por "/".
+    const names = editing.options.map((option) => option.name.replace(/,/g, '/').trim())
+    if (names.some((name) => !name)) { setError('Ponle nombre a cada opción (o bórrala con la X).'); return }
+    if (new Set(names).size !== names.length) { setError('Hay dos opciones con el mismo nombre. Cámbiale el nombre a una de ellas.'); return }
+    const draft = editing
+    let createdId = 0
+    await withBusy(async () => {
+      const id = await saveProduct({ data: {
+        id: draft.id,
+        name: draft.name,
+        category: draft.category,
+        description: draft.description,
+        options: names.join(', '),
+        price: cents(draft.price),
+        originalPrice: cents(draft.originalPrice),
+        stock: Math.round(Number(draft.stock || 0)),
+        image: draft.image,
+        variantImages: draft.options.map((option, index) => ({ option: names[index], image: option.image, description: option.description, price: cents(option.price), stock: Math.round(Number(option.stock || 0)) })),
+        optionStock: draft.optionStock && names.length > 0,
+        renames: draft.options.map((option, index) => ({ from: option.originalName, to: names[index] })).filter((rename) => rename.from && rename.from !== rename.to),
+        featured: draft.featured,
+        isNew: draft.isNew,
+        bestSeller: draft.bestSeller,
+        active: draft.active,
+      } })
+      if (!draft.id) createdId = Number(id)
+      setEditing(null)
+    })
+    if (createdId) setPendingRestock(createdId)
+  }
 
-  const activeOrders = data.orders.filter((order) => order.status !== 'Cancelado')
-  const collected = activeOrders.filter((order) => order.paymentStatus === 'Pagado').reduce((sum, order) => sum + order.total, 0)
-  const pending = activeOrders.filter((order) => order.paymentStatus === 'Pendiente').reduce((sum, order) => sum + order.total, 0)
-  const openOrders = data.orders.filter((order) => ['Pendiente', 'Preparando', 'Enviado'].includes(order.status))
-  const newOrders = data.orders.filter((order) => order.status === 'Pendiente').length
-  const averageTicket = activeOrders.length ? Math.round(activeOrders.reduce((sum, order) => sum + order.total, 0) / activeOrders.length) : 0
-  const lowStockProducts = data.products.filter((product) => product.stock <= LOW_STOCK).sort((a, b) => a.stock - b.stock)
-  const bestSellers = Object.values(activeOrders.flatMap((order) => order.items).reduce<Record<string, { name: string; units: number; revenue: number }>>((acc, item) => {
-    const key = item.name
-    acc[key] = acc[key] ?? { name: item.name, units: 0, revenue: 0 }
-    acc[key].units += item.quantity; acc[key].revenue += item.price * item.quantity
-    return acc
-  }, {})).sort((a, b) => b.units - a.units).slice(0, 5)
-  const viewingOrder = viewingOrderId ? data.orders.find((order) => order.id === viewingOrderId) ?? null : null
-  const ordersFor = (customer: Customer) => data.orders.filter((order) => order.customerId === customer.id || (!order.customerId && order.email && order.email.toLowerCase() === customer.email.toLowerCase()))
-  const contentDirty = Object.keys(contentDraft).some((key) => (contentDraft[key] ?? '') !== (data.content[key] ?? ''))
+  async function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file || !editing) return
+    setUploading(true)
+    setError('')
+    try {
+      const url = await uploadFile(file)
+      setEditing((current) => (current ? { ...current, image: url } : current))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos subir la imagen.')
+    } finally {
+      setUploading(false)
+      event.target.value = ''
+    }
+  }
 
-  const tabs: { id: Tab; label: string; short: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'resumen', label: 'Resumen', short: 'Inicio', icon: <LayoutDashboard/> },
-    { id: 'pedidos', label: 'Pedidos y facturas', short: 'Pedidos', icon: <ReceiptText/>, badge: newOrders },
-    { id: 'productos', label: 'Productos', short: 'Productos', icon: <Boxes/>, badge: data.products.filter((product) => product.stock === 0).length },
-    { id: 'clientes', label: 'Clientes', short: 'Clientes', icon: <Users/> },
-    { id: 'contenido', label: 'Editor de contenido', short: 'Contenido', icon: <FileText/> },
+  async function handleVariantImageChange(key: string, event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file || !editing) return
+    setUploadingVariant(key)
+    setError('')
+    try {
+      const url = await uploadFile(file)
+      updateOption(key, { image: url })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No pudimos subir la imagen.')
+    } finally {
+      setUploadingVariant(null)
+      event.target.value = ''
+    }
+  }
+
+  async function handleSaveCustomer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingCustomer) return
+    await withBusy(async () => {
+      await saveCustomer({ data: editingCustomer })
+      setEditingCustomer(null)
+    })
+  }
+
+  async function handleSaveContent() {
+    await withBusy(() => saveContent({ data: contentDraft }))
+  }
+
+  // ─── Compras (reponer) ───
+  function openPurchase(product?: Product) {
+    setNotice('')
+    setError('')
+    setEditingPurchase(purchaseDraftFor(product))
+  }
+
+  function updatePurchaseLine(index: number, patch: Partial<PurchaseLine>) {
+    setEditingPurchase((current) => current && { ...current, lines: current.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) })
+  }
+
+  async function handleSavePurchase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingPurchase) return
+    const lines = editingPurchase.lines
+      .map((line) => ({ ...line, unitCost: line.unitCost !== '' ? line.unitCost : editingPurchase.sameCost }))
+      .filter((line) => Number(line.quantity) > 0)
+    if (!lines.length) { setError('Pon cuántas unidades compraste (al menos 1).'); return }
+    if (lines.some((line) => line.unitCost === '' || Number(line.unitCost) < 0)) { setError('Pon el costo por unidad de cada compra.'); return }
+    const draft = editingPurchase
+    await withBusy(async () => {
+      const result = await recordPurchase({ data: {
+        productId: Number(draft.productId),
+        notes: draft.notes,
+        fund: draft.fund,
+        lines: lines.map((line) => ({ option: line.option, quantity: Math.round(Number(line.quantity)), unitCost: cents(line.unitCost) })),
+      } })
+      setEditingPurchase(null)
+      const paidWith = result.fund === 'reinversion' ? ' con el dinero para reinvertir' : ''
+      setNotice(result.lots > 1 ? `Listo: se registraron ${result.lots} compras (una por opción) por ${money(result.total)}${paidWith}.` : `Listo: compra registrada por ${money(result.total)}${paidWith}.`)
+    })
+  }
+
+  function confirmDeletePurchase(purchase: Purchase) {
+    const sold = purchase.quantity - purchase.remainingQuantity
+    const pocket = FUND_LABEL[purchase.fund === 'reinversion' ? 'reinversion' : 'capital']
+    const message = sold > 0
+      ? `De este lote ya se vendieron ${sold}. No se puede borrar entero sin descuadrar las Finanzas, así que se quitarán solo las ${purchase.remainingQuantity} que quedan: salen del inventario y ${money(purchase.remainingQuantity * purchase.unitCost)} vuelven al ${pocket}. ¿Continuar?`
+      : `¿Eliminar esta compra? Se restan ${purchase.remainingQuantity} unidades del inventario y ${money(purchase.totalCost)} vuelven al ${pocket}.`
+    if (!window.confirm(message)) return
+    withBusy(async () => {
+      const result = await deletePurchase({ data: purchase.id })
+      if (result.adjustByHand) setNotice('Compra borrada. Como era una compra sin opción, revisa en «Editar» cuántas quedan de cada opción.')
+    })
+  }
+
+  async function handleSplit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!splitDraft) return
+    const draft = splitDraft
+    await withBusy(async () => {
+      await splitPurchase({ data: { id: draft.purchase.id, parts: Object.entries(draft.parts).map(([option, quantity]) => ({ option, quantity: Math.round(Number(quantity || 0)) })) } })
+      setSplitDraft(null)
+      setNotice('Listo: la compra quedó repartida. Ahora cada opción sale con su propio costo.')
+    })
+  }
+
+  // ─── Pedidos ───
+  async function handleSaveOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingOrder) return
+    await withBusy(async () => {
+      await updateOrder({ data: {
+        id: editingOrder.id,
+        customerName: editingOrder.customerName,
+        email: editingOrder.email,
+        phone: editingOrder.phone,
+        address: editingOrder.address,
+        notes: editingOrder.notes,
+        items: editingOrder.items,
+        discount: editingOrder.discount,
+      } })
+      setEditingOrder(null)
+    })
+  }
+
+  async function handleDownloadInvoice(order: Order) {
+    await withBusy(async () => {
+      const JsPDF = await loadJsPdf()
+      buildInvoiceDoc(JsPDF, order).save(`Factura-${order.orderNumber}.pdf`)
+    })
+  }
+
+  async function handleShareInvoice(order: Order) {
+    await withBusy(async () => {
+      const JsPDF = await loadJsPdf()
+      const doc = buildInvoiceDoc(JsPDF, order)
+      const file = new File([doc.output('blob')], `Factura-${order.orderNumber}.pdf`, { type: 'application/pdf' })
+      const nav = navigator as any
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        try { await nav.share({ files: [file], title: `Factura ${order.orderNumber}` }) }
+        catch (err) { if ((err as Error)?.name !== 'AbortError') doc.save(file.name) }
+      } else {
+        doc.save(file.name)
+      }
+    })
+  }
+
+  // ─── Venta por fuera ───
+  function openSale(product?: Product) {
+    setNotice('')
+    setError('')
+    setSaleDraft({ customerName: '', phone: '', notes: '', paymentStatus: 'Pagado', lines: [emptySaleLine(product)] })
+  }
+
+  function updateSaleLine(index: number, patch: Partial<SaleLine>) {
+    setSaleDraft((current) => current && { ...current, lines: current.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) })
+  }
+
+  async function handleSaveSale(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!saleDraft) return
+    await withBusy(async () => {
+      const result = await recordManualSale({ data: {
+        customerName: saleDraft.customerName,
+        phone: saleDraft.phone,
+        notes: saleDraft.notes,
+        paymentStatus: saleDraft.paymentStatus,
+        items: saleDraft.lines.map((line) => ({ productId: Number(line.productId), option: line.option, quantity: Math.round(Number(line.quantity || 0)), price: cents(line.price) })),
+      } })
+      setSaleDraft(null)
+      setNotice(`Venta ${result.orderNumber} registrada por ${money(result.total)}. Ya se descontó del inventario y cuenta en Finanzas.`)
+    })
+  }
+
+  async function handleSaveExpense(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingExpense) return
+    await withBusy(async () => {
+      await recordExpense({ data: {
+        type: editingExpense.type,
+        description: editingExpense.description,
+        amount: cents(editingExpense.amount),
+      } })
+      setEditingExpense(null)
+    })
+  }
+
+  async function handleSaveFinanceSettings() {
+    await withBusy(() => saveContent({ data: {
+      capitalInicial: String(cents(financeSettings.capitalInicial)),
+      reinvestPercent: String(Math.min(100, Math.max(0, Math.round(Number(financeSettings.reinvestPercent || 0))))),
+    } }))
+  }
+
+  if (authenticated === null) return <div className="rc-admin"><div className="admin-loading">Cargando…</div></div>
+
+  if (!authenticated) {
+    return (
+      <div className="rc-admin"><div className="admin-login-screen">
+        <form className="admin-login-card" onSubmit={handleLogin}>
+          <span className="drawer-kicker">RITUAL COBRE · ADMIN</span>
+          <h1>Panel administrativo</h1>
+          <p>Ingresa la contraseña para gestionar el catálogo, los pedidos y los textos de la tienda.</p>
+          <input type="password" required placeholder="Contraseña" value={password} onChange={(event) => setPassword(event.target.value)} autoFocus />
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button full" disabled={busy}>{busy ? 'Verificando…' : 'Entrar'}</button>
+          <Link to="/" className="admin-back-link"><ChevronLeft size={15} />Volver a la tienda</Link>
+        </form>
+      </div></div>
+    )
+  }
+
+  if (!data) return <div className="rc-admin"><div className="admin-loading">Cargando panel…</div></div>
+
+  const productById = new Map(data.products.map((product) => [product.id, product]))
+  const lotsByProduct = new Map<number, Purchase[]>()
+  for (const purchase of data.purchases) lotsByProduct.set(purchase.productId, [...(lotsByProduct.get(purchase.productId) ?? []), purchase])
+  const statusById = new Map<number, LotStatus>()
+  for (const [productId, lots] of lotsByProduct) for (const [id, status] of lotStatuses(lots, productById.get(productId))) statusById.set(id, status)
+
+  const filteredProducts = data.products.filter((product) => `${product.name} ${product.options}`.toLowerCase().includes(query.toLowerCase()))
+  const filteredOrders = data.orders.filter((order) => `${order.orderNumber} ${order.customerName} ${order.phone}`.toLowerCase().includes(query.toLowerCase()))
+  const filteredPurchases = data.purchases.filter((purchase) => `${purchase.productName} ${purchase.option} ${purchase.notes} ${purchase.fund === 'reinversion' ? 'reinversión reinversion' : ''}`.toLowerCase().includes(purchaseQuery.toLowerCase()))
+  const filteredCustomers = data.customers.filter((customer) => `${customer.name} ${customer.phone} ${customer.email}`.toLowerCase().includes(query.toLowerCase()))
+  const pendingOrders = data.orders.filter((order) => order.status === 'Pendiente').length
+  const outOfStock = data.products.filter((product) => product.stock === 0).length
+  const lowStock = data.products.filter((product) => product.active && product.stock > 0 && product.stock <= 3)
+  const porCobrarOrders = data.orders.filter((order) => order.paymentStatus !== 'Pagado' && order.status !== 'Cancelado')
+  const porCobrar = porCobrarOrders.reduce((sum, order) => sum + order.total, 0)
+  // Unidades en stock que no tienen una compra registrada detrás: al
+  // venderse, su costo cuenta como 0 y la ganancia sale inflada.
+  const remainingByProduct = new Map<number, number>()
+  for (const purchase of data.purchases) remainingByProduct.set(purchase.productId, (remainingByProduct.get(purchase.productId) ?? 0) + (purchase.remainingQuantity ?? 0))
+  const uncostedProducts = data.products.filter((product) => product.stock > (remainingByProduct.get(product.id) ?? 0) && product.cost === 0)
+  const uncostedIds = new Set(uncostedProducts.map((product) => product.id))
+  const matchesCatalogFilter = (product: Product, filter: CatalogFilter) =>
+    filter === 'todos' ? true
+      : filter === 'agotados' ? product.stock === 0
+      : filter === 'bajo' ? product.stock > 0 && product.stock <= 3
+      : filter === 'sincosto' ? uncostedIds.has(product.id)
+      : !product.active
+  const catalogProducts = filteredProducts.filter((product) => matchesCatalogFilter(product, catalogFilter) && (!catalogCategory || product.category === catalogCategory))
+  const trashTotal = data.trash.products.length + data.trash.orders.length + data.trash.customers.length + data.trash.images.length
+
+  // Finanzas: todo se calcula a partir de pedidos pagados + compras +
+  // gastos registrados. `cost` en cada línea de un pedido es lo que costó
+  // esa unidad (sale del lote de compra del que se vendió).
+  // Un pedido cancelado no cuenta aunque haya quedado marcado "Pagado"
+  // (por ejemplo, si se le devolvió el dinero al cliente).
+  const paidOrders = data.orders.filter((order) => order.paymentStatus === 'Pagado' && order.status !== 'Cancelado')
+  const ingresos = paidOrders.reduce((sum, order) => sum + order.total, 0)
+  const costoVentas = paidOrders.reduce((sum, order) => sum + order.items.reduce((s, item) => s + item.cost * item.quantity, 0), 0)
+  const gananciaBruta = ingresos - costoVentas
+  // El «Dinero para reinvertir» es de la dueña, como su cartera: si compra
+  // mercancía con él, al venderla lo que costó vuelve a esa caja y lo que se
+  // ganó es 100% suyo (no se reparte). `reinvQty`/`reinvCost` de cada línea
+  // dicen cuántas unidades salieron de esos lotes y cuánto costaron. El
+  // descuento del pedido se reparte en proporción al precio de cada línea.
+  let ventasReinvExacto = 0
+  let recuperadoReinv = 0
+  for (const order of paidOrders) {
+    const subtotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    const share = subtotal > 0 ? order.total / subtotal : 0
+    for (const item of order.items) {
+      const reinvQty = Math.min(item.quantity, Math.max(0, item.reinvQty ?? 0))
+      if (!reinvQty) continue
+      ventasReinvExacto += item.price * reinvQty * share
+      recuperadoReinv += item.reinvCost ?? 0
+    }
+  }
+  const ventasReinv = Math.round(ventasReinvExacto)
+  const gananciaPropia = ventasReinv - recuperadoReinv
+  const gananciaNegocio = gananciaBruta - gananciaPropia
+  const gastadoReinv = data.purchases.filter((purchase) => purchase.fund === 'reinversion').reduce((sum, purchase) => sum + purchase.totalCost, 0)
+  const gastadoCapital = data.purchases.filter((purchase) => purchase.fund !== 'reinversion').reduce((sum, purchase) => sum + purchase.totalCost, 0)
+  const recuperadoCapital = costoVentas - recuperadoReinv
+  const capitalInicial = Number(data.content.capitalInicial || 0)
+  // Los gastos del NEGOCIO salen del capital del negocio (el dinero con
+  // que se compra mercancía), no de la ganancia: así la ganancia que se
+  // reparte entre reinversión y "Para ti" queda completa. Los gastos
+  // PERSONALES sí salen solo de lo que te toca a ti.
+  const gastosNegocio = data.expenses.filter((expense) => expense.type === 'negocio').reduce((sum, expense) => sum + expense.amount, 0)
+  const capitalDisponible = capitalInicial - gastadoCapital + recuperadoCapital - gastosNegocio
+  const gastosPersonales = data.expenses.filter((expense) => expense.type === 'personal').reduce((sum, expense) => sum + expense.amount, 0)
+  const reinvestPercent = Number(data.content.reinvestPercent ?? 70)
+  // Solo la ganancia del negocio se reparte entre reinversión y «Para ti».
+  const reinversion = Math.round((gananciaNegocio * reinvestPercent) / 100)
+  const paraTi = gananciaNegocio - reinversion
+  const dineroReinvertir = reinversion - gastadoReinv + recuperadoReinv
+  const disponibleRetirar = paraTi + gananciaPropia - gastosPersonales
+  const inventoryValue = data.purchases.reduce((sum, purchase) => sum + purchase.remainingQuantity * purchase.unitCost, 0)
+
+  const TABS: Array<{ id: Tab; label: string; icon: ComponentType<{ size?: number }> }> = [
+    { id: 'resumen', label: 'Inicio', icon: LayoutDashboard },
+    { id: 'catalogo', label: 'Productos', icon: Package },
+    { id: 'pedidos', label: `Pedidos${pendingOrders ? ` (${pendingOrders})` : ''}`, icon: ListOrdered },
+    { id: 'finanzas', label: 'Finanzas', icon: Wallet },
+    { id: 'clientes', label: 'Clientes', icon: Users },
+    { id: 'contenido', label: 'Textos', icon: Pencil },
+    { id: 'papelera', label: `Papelera${trashTotal ? ` (${trashTotal})` : ''}`, icon: Trash2 },
   ]
 
-  const changeTab = (next: Tab) => {
-    if (tab === 'contenido' && next !== 'contenido' && contentDirty && !confirm('Tienes cambios sin guardar en el contenido. ¿Salir sin guardar?')) return
-    if (tab === 'contenido' && next !== 'contenido' && contentDirty) setContentDraft(data.content)
-    setTab(next); setQuery(''); setStatusFilter('Todos'); setCategoryFilter('Todas')
-    window.scrollTo({ top: 0 })
-  }
+  const goTab = (id: Tab) => { setTab(id); setQuery(''); setCatalogFilter('todos'); setCatalogCategory(''); setNotice('') }
 
-  const setOrderStatus = (order: Order, patch: Partial<Pick<Order, 'status' | 'paymentStatus'>>) => {
-    const next = { status: patch.status ?? order.status, paymentStatus: patch.paymentStatus ?? order.paymentStatus }
-    if (patch.status === 'Cancelado' && !confirm(`¿Cancelar el pedido ${order.orderNumber}? Las unidades vuelven al inventario.`)) return
-    return run(() => updateOrderStatus({ data: { id: order.id, ...next } }), `Pedido ${order.orderNumber} actualizado.`)
-  }
+  // ─── Datos para los formularios abiertos ───
+  const purchaseProduct = editingPurchase ? productById.get(Number(editingPurchase.productId)) : undefined
+  const purchaseTracking = purchaseProduct ? tracksOptionStock(purchaseProduct) : false
+  const purchaseTotal = editingPurchase
+    ? editingPurchase.lines.reduce((sum, line) => sum + Math.round(Number(line.quantity || 0)) * cents(line.unitCost !== '' ? line.unitCost : editingPurchase.sameCost), 0)
+    : 0
+  const lotsProduct = lotsProductId ? productById.get(lotsProductId) : undefined
+  const lotsOfProduct = lotsProduct ? [...(lotsByProduct.get(lotsProduct.id) ?? [])].sort(byFifo) : []
+  const editingSum = editing ? editing.options.reduce((sum, option) => sum + Math.max(0, Math.round(Number(option.stock || 0))), 0) : 0
+  const editingOriginal = editing?.id ? productById.get(editing.id) : undefined
+  const modalOpen = Boolean(editing || editingCustomer || editingOrder || editingPurchase || editingExpense || saleDraft || splitDraft || lotsProduct)
 
-  const removeOrder = async (order: Order) => {
-    const restock = order.status === 'Pendiente' || order.status === 'Preparando'
-    if (!confirm(`¿Eliminar el pedido ${order.orderNumber}? Esta acción no se puede deshacer.${restock ? ' Las unidades vuelven al inventario.' : ''}`)) return
-    const ok = await run(() => deleteOrder({ data: order.id }), 'Pedido eliminado.')
-    if (ok) setViewingOrderId(null)
-  }
-
-  const invoiceContext = { brand: data.content.brandName || 'Ritual Cobre', currency, whatsapp: data.content.whatsapp || '', email: data.content.contactEmail || '' }
-  const download = (order: Order) => downloadOrder(order, invoiceContext).catch((caught) => notify('error', errorText(caught, 'No pudimos generar el PDF.')))
-  const share = (order: Order) => shareOrder(order, invoiceContext).catch((caught) => notify('error', errorText(caught, 'No pudimos compartir el pedido.')))
-
-  return <div className="admin-shell">
-    <aside className="admin-sidebar">
-      <Link to="/" className="admin-brand"><BrandMark className="admin-brand-mark"/><div>{invoiceContext.brand}<small>Administración</small></div></Link>
-      <nav aria-label="Secciones del panel">{tabs.map((item) => <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => changeTab(item.id)} aria-current={tab === item.id ? 'page' : undefined}>{item.icon}<span className="nav-label">{item.label}</span><span className="nav-short">{item.short}</span>{Boolean(item.badge) && <b className="nav-badge">{item.badge}</b>}</button>)}</nav>
-      <a className="sidebar-link" href="/" target="_blank" rel="noreferrer"><Store/>Ver tienda</a>
-      <button className="logout" onClick={handleLogout}><LogOut/>Cerrar sesión</button>
-    </aside>
-    <main className="admin-main">
-      <header className="admin-header"><div><span>ESPACIO DE GESTIÓN</span><h1>{tabs.find((item) => item.id === tab)?.label}</h1></div><div className="admin-header-actions"><a href="/" target="_blank" rel="noreferrer" className="header-chip"><Store/><span>Ver tienda</span></a><button className="header-chip mobile-only" onClick={handleLogout} aria-label="Cerrar sesión"><LogOut/></button></div></header>
-
-      {tab === 'resumen' && <div className="dashboard">
-        <div className="metric-grid">
-          <article><span>Cobrado</span><strong>{money(collected)}</strong><small>Pedidos marcados como pagados</small></article>
-          <article className={pending ? 'attention' : ''}><span>Por cobrar</span><strong>{money(pending)}</strong><small>{activeOrders.filter((order) => order.paymentStatus === 'Pendiente').length} pedidos con pago pendiente</small></article>
-          <article><span>Pedidos abiertos</span><strong>{openOrders.length}</strong><small>{newOrders} nuevos por confirmar</small></article>
-          <article><span>Ticket promedio</span><strong>{money(averageTicket)}</strong><small>{activeOrders.length} pedidos · {data.customers.length} clientes</small></article>
+  return (
+    <div className="rc-admin"><div className="admin-shell">
+      <aside className="admin-sidebar">
+        <span className="drawer-kicker">RITUAL COBRE</span>
+        <h1>Panel admin</h1>
+        <nav>
+          {TABS.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => goTab(id)}><Icon size={17} />{label}</button>)}
+        </nav>
+        <div className="admin-sidebar-footer">
+          <Link to="/"><ChevronLeft size={15} />Ver la tienda</Link>
+          <button onClick={handleLogout}><LogOut size={15} />Cerrar sesión</button>
         </div>
-        <div className="dashboard-grid">
-          <section className="admin-card span-2"><div className="card-title"><div><span>ACTIVIDAD RECIENTE</span><h2>Últimos pedidos</h2></div><button className="text-button" onClick={() => changeTab('pedidos')}>Ver todos</button></div><OrderTable orders={data.orders.slice(0, 6)} money={money} onOpen={(order) => setViewingOrderId(order.id)} onStatus={setOrderStatus} busy={busy}/></section>
-          <section className="admin-card"><div className="card-title"><div><span>INVENTARIO</span><h2>Stock bajo</h2></div><TriangleAlert className="card-icon warn"/></div>{lowStockProducts.length ? <ul className="mini-list">{lowStockProducts.slice(0, 6).map((product) => <li key={product.id}><img src={product.image || '/placeholder.png'} alt=""/><div><strong>{product.name}</strong><small>{product.category}</small></div><button className={`stock-pill ${product.stock === 0 ? 'out' : 'low'}`} onClick={() => setEditing(toDraft(product))}>{product.stock === 0 ? 'Agotado' : `${product.stock} uds.`}</button></li>)}</ul> : <p className="empty-admin compact"><CircleCheck/> Todo el inventario está en buen nivel.</p>}</section>
-          <section className="admin-card"><div className="card-title"><div><span>VENTAS</span><h2>Más vendidos</h2></div><TrendingUp className="card-icon"/></div>{bestSellers.length ? <ol className="rank-list">{bestSellers.map((item, index) => <li key={item.name}><b>{index + 1}</b><div><strong>{item.name}</strong><small>{item.units} unidades</small></div><span>{money(item.revenue)}</span></li>)}</ol> : <p className="empty-admin compact">Aún no hay ventas registradas.</p>}</section>
-        </div>
-      </div>}
+      </aside>
 
-      {tab === 'pedidos' && <section className="admin-card"><div className="card-title"><div><span>HISTORIAL</span><h2>{filteredOrders.length} {filteredOrders.length === 1 ? 'pedido' : 'pedidos'}</h2></div></div>
-        <div className="toolbar"><label className="search-field"><Search/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por número, cliente, correo o teléfono…" type="search"/></label></div>
-        <div className="chip-row">{['Todos', ...ORDER_STATUSES, 'Por cobrar'].map((item) => <button key={item} className={statusFilter === item ? 'active' : ''} onClick={() => setStatusFilter(item)}>{item}<span>{item === 'Todos' ? data.orders.length : item === 'Por cobrar' ? activeOrders.filter((order) => order.paymentStatus === 'Pendiente').length : data.orders.filter((order) => order.status === item).length}</span></button>)}</div>
-        <OrderTable orders={filteredOrders} money={money} onOpen={(order) => setViewingOrderId(order.id)} onStatus={setOrderStatus} busy={busy} emptyText={data.orders.length ? 'Ningún pedido coincide con el filtro.' : 'Todavía no hay pedidos. Cuando un cliente compre en la tienda aparecerá aquí.'}/>
-      </section>}
+      <main className="admin-main">
+        {error && !modalOpen && <p className="form-error admin-error">{error}</p>}
+        {notice && <p className="admin-notice"><Check size={15} />{notice}<button type="button" onClick={() => setNotice('')} aria-label="Cerrar"><X size={14} /></button></p>}
 
-      {tab === 'productos' && <section className="admin-card"><div className="card-title"><div><span>CATÁLOGO</span><h2>{filteredProducts.length} {filteredProducts.length === 1 ? 'producto' : 'productos'}</h2></div><button className="admin-action" onClick={() => setEditing(blankProduct)}><PackagePlus/>Nuevo producto</button></div>
-        <div className="toolbar"><label className="search-field"><Search/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre o categoría…" type="search"/></label></div>
-        <div className="chip-row">{['Todas', ...categories].map((item) => <button key={item} className={categoryFilter === item ? 'active' : ''} onClick={() => setCategoryFilter(item)}>{item}<span>{item === 'Todas' ? data.products.length : data.products.filter((product) => product.category === item).length}</span></button>)}</div>
-        <div className="admin-product-list">{filteredProducts.map((product) => <article key={product.id}><img src={product.image || '/placeholder.png'} alt="" loading="lazy" decoding="async"/><div><span>{product.category}{product.featured && <em className="featured-tag"><Star/> Destacado</em>}</span><h3>{product.name}</h3><p><strong>{money(product.price)}</strong> · <em className={`stock-pill ${product.stock === 0 ? 'out' : product.stock <= LOW_STOCK ? 'low' : 'ok'}`}>{product.stock === 0 ? 'Agotado' : `${product.stock} en stock`}</em></p></div><div className="row-actions"><button onClick={() => setEditing(toDraft(product))} aria-label={`Editar ${product.name}`} title="Editar"><Pencil/></button><button onClick={() => { if (confirm(`¿Eliminar «${product.name}»? Los pedidos anteriores conservan su información.`)) run(() => deleteProduct({ data: product.id }), 'Producto eliminado.') }} aria-label={`Eliminar ${product.name}`} title="Eliminar"><Trash2/></button></div></article>)}{!filteredProducts.length && <div className="empty-admin">No hay productos que mostrar.</div>}</div>
-      </section>}
+        {tab === 'resumen' && (
+          <section>
+            <h2>Inicio</h2>
+            <AppAndNotifications />
+            <div className="quick-actions">
+              <button type="button" onClick={() => openSale()}><ShoppingCart size={20} /><span>Registrar venta</span></button>
+              <button type="button" onClick={() => openPurchase()}><ShoppingBag size={20} /><span>Registrar compra</span></button>
+              <button type="button" onClick={() => { goTab('catalogo'); setEditing(emptyDraft()) }}><Plus size={20} /><span>Nuevo producto</span></button>
+            </div>
+            <div className="admin-cards">
+              <div className="admin-card"><span>Pedidos pendientes</span><strong>{pendingOrders}</strong></div>
+              <div className="admin-card"><span>Por cobrar ({porCobrarOrders.length})</span><strong>{money(porCobrar)}</strong></div>
+              <div className="admin-card"><span>Productos agotados</span><strong>{outOfStock}</strong></div>
+              <div className="admin-card"><span>Quedan pocos (≤3)</span><strong>{lowStock.length}</strong></div>
+            </div>
+            {lowStock.length > 0 && <>
+              <h3>Quedan pocas unidades</h3>
+              <div className="admin-table">
+                {lowStock.slice(0, 8).map((product) => <div className="admin-row admin-row-product" key={product.id}>
+                  <img src={product.image || '/placeholder.png'} alt="" />
+                  <div><strong>{product.name}</strong><span>Quedan {product.stock}</span></div>
+                  <button className="ghost-button" onClick={() => openPurchase(product)}>Reponer</button>
+                </div>)}
+              </div>
+            </>}
+            <h3>Últimos pedidos</h3>
+            <div className="admin-table">
+              {data.orders.slice(0, 6).map((order) => <div className="admin-row" key={order.id}>
+                <div><strong>{order.orderNumber}</strong><span>{order.customerName}</span></div>
+                <span className={`status-pill status-${order.status.toLowerCase()}`}>{order.status}</span>
+                <strong>{money(order.total)}</strong>
+              </div>)}
+              {!data.orders.length && <p className="admin-empty">Todavía no hay pedidos.</p>}
+            </div>
+          </section>
+        )}
 
-      {tab === 'clientes' && <section className="admin-card"><div className="card-title"><div><span>COMUNIDAD</span><h2>{filteredCustomers.length} {filteredCustomers.length === 1 ? 'cliente' : 'clientes'}</h2></div><button className="admin-action" onClick={() => setEditingCustomer(blankCustomer)}><UserPlus/>Nuevo cliente</button></div>
-        <div className="toolbar"><label className="search-field"><Search/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre, correo o teléfono…" type="search"/></label></div>
-        <div className="customer-grid">{filteredCustomers.map((customer) => { const history = ordersFor(customer); const spent = history.filter((order) => order.status !== 'Cancelado').reduce((sum, order) => sum + order.total, 0); const wa = whatsappLink(customer.phone); return <article key={customer.id}><div className="customer-card-top"><div className="avatar">{customer.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</div><div className="row-actions"><button onClick={() => setEditingCustomer({ id: customer.id, name: customer.name, email: customer.email, phone: customer.phone, address: customer.address, notes: customer.notes })} aria-label="Editar cliente" title="Editar"><Pencil/></button><button onClick={() => { if (confirm(`¿Eliminar a ${customer.name}? Sus pedidos se conservan en el historial.`)) run(() => deleteCustomer({ data: customer.id }), 'Cliente eliminado.') }} aria-label="Eliminar cliente" title="Eliminar"><Trash2/></button></div></div><h3>{customer.name}</h3>{customer.email && <a href={`mailto:${customer.email}`}>{customer.email}</a>}{customer.phone && <p>{customer.phone}</p>}{customer.address && <p>{customer.address}</p>}{customer.notes && <small className="customer-notes">{customer.notes}</small>}<div className="customer-stats"><span><b>{history.length}</b> {history.length === 1 ? 'pedido' : 'pedidos'}</span><span><b>{money(spent)}</b> en compras</span></div><div className="customer-contact">{wa && <a href={wa} target="_blank" rel="noreferrer"><MessageCircle/>WhatsApp</a>}{customer.phone && <a href={`tel:${customer.phone.replace(/[^\d+]/g, '')}`}><Phone/>Llamar</a>}</div></article> })}{!filteredCustomers.length && <div className="empty-admin">No hay clientes que mostrar.</div>}</div>
-      </section>}
+        {tab === 'finanzas' && (
+          <section>
+            <h2>Finanzas</h2>
+            <div className="quick-actions">
+              <button type="button" onClick={() => openSale()}><ShoppingCart size={20} /><span>Registrar venta</span></button>
+              <button type="button" onClick={() => openPurchase()}><ShoppingBag size={20} /><span>Registrar compra</span></button>
+              <button type="button" onClick={() => setEditingExpense(emptyExpenseDraft())}><Plus size={20} /><span>Registrar gasto</span></button>
+            </div>
 
-      {tab === 'contenido' && <ContentEditor values={contentDraft} saved={data.content} dirty={contentDirty} uploading={uploading} onChange={setContentDraft} onUpload={uploadImage} onDiscard={() => setContentDraft(data.content)} onSave={() => run(() => saveContent({ data: contentDraft }), 'Cambios publicados en la tienda.', 'No pudimos guardar el contenido.')} busy={busy}/>}
-    </main>
+            <div className="money-hero">
+              <div className="money-card"><span>Dinero del negocio</span><strong>{money(capitalDisponible)}</strong><small>Lo que hay para comprar mercancía</small></div>
+              <div className="money-card"><span>Dinero para reinvertir</span><strong>{money(dineroReinvertir)}</strong><small>Tu {reinvestPercent}% de la ganancia, para comprar más mercancía</small></div>
+              <div className="money-card money-card-accent"><span>Puedes retirar</span><strong>{money(disponibleRetirar)}</strong><small>Tu {100 - reinvestPercent}% de la ganancia{gananciaPropia !== 0 ? ', más lo que ganaste con el dinero para reinvertir,' : ''} menos tus gastos personales</small></div>
+              <div className="money-card"><span>Ganancia</span><strong>{money(gananciaBruta)}</strong><small>De las ventas ya pagadas</small></div>
+              <div className="money-card"><span>Mercancía en existencia</span><strong>{money(inventoryValue)}</strong><small>Lo que costó lo que todavía no se ha vendido</small></div>
+            </div>
+            {porCobrar > 0 && <p className="admin-hint"><AlertTriangle size={14} />Te deben {money(porCobrar)} de {porCobrarOrders.length} {porCobrarOrders.length === 1 ? 'pedido' : 'pedidos'} sin pagar. Cuando los marques «Pagado» se suman aquí.</p>}
+            {uncostedProducts.length > 0 && (
+              <p className="form-error">
+                {uncostedProducts.length === 1 ? '1 producto tiene' : `${uncostedProducts.length} productos tienen`} unidades sin una compra registrada, así que su costo cuenta como RD$0 y la ganancia sale más alta de lo real: {uncostedProducts.slice(0, 5).map((product) => product.name).join(', ')}{uncostedProducts.length > 5 ? '…' : ''}. Para corregirlo, pon esas existencias en 0 en «Editar» y regístralas con «Reponer». <button type="button" className="link-button" onClick={() => { goTab('catalogo'); setCatalogFilter('sincosto') }}>Ver cuáles son</button>
+              </p>
+            )}
 
-    <nav className="admin-bottom-nav" aria-label="Secciones">{tabs.map((item) => <button key={item.id} className={tab === item.id ? 'active' : ''} onClick={() => changeTab(item.id)}>{item.icon}<span>{item.short}</span>{Boolean(item.badge) && <b className="nav-badge">{item.badge}</b>}</button>)}</nav>
+            <Collapsible title="Ver todas las cuentas (cómo se calcula)">
+              <h3 className="finance-group-title">Ventas</h3>
+              <div className="admin-cards">
+                <div className="admin-card"><span>Vendido (pagado)</span><strong>{money(ingresos)}</strong></div>
+                <div className="admin-card"><span>Costo de lo vendido</span><strong>{money(costoVentas)}</strong></div>
+                <div className="admin-card"><span>Ganancia del negocio</span><strong>{money(gananciaNegocio)}</strong></div>
+                <div className="admin-card"><span>Ganancia de tu dinero para reinvertir</span><strong>{money(gananciaPropia)}</strong></div>
+              </div>
+              <h3 className="finance-group-title">Dinero del negocio</h3>
+              <div className="admin-cards">
+                <div className="admin-card"><span>Capital inicial</span><strong>{money(capitalInicial)}</strong></div>
+                <div className="admin-card"><span>Gastado en compras</span><strong>{money(gastadoCapital)}</strong></div>
+                <div className="admin-card"><span>Recuperado al vender</span><strong>{money(recuperadoCapital)}</strong></div>
+                <div className="admin-card"><span>Gastos del negocio</span><strong>{money(gastosNegocio)}</strong></div>
+              </div>
+              <h3 className="finance-group-title">Dinero para reinvertir</h3>
+              <div className="admin-cards">
+                <div className="admin-card"><span>Reinversión ({reinvestPercent}%)</span><strong>{money(reinversion)}</strong></div>
+                <div className="admin-card"><span>Gastado en compras</span><strong>{money(gastadoReinv)}</strong></div>
+                <div className="admin-card"><span>Recuperado al vender</span><strong>{money(recuperadoReinv)}</strong></div>
+              </div>
+              <h3 className="finance-group-title">Lo tuyo</h3>
+              <div className="admin-cards">
+                <div className="admin-card"><span>Para ti ({100 - reinvestPercent}%)</span><strong>{money(paraTi)}</strong></div>
+                <div className="admin-card"><span>Ganancia de tu dinero para reinvertir</span><strong>{money(gananciaPropia)}</strong></div>
+                <div className="admin-card"><span>Gastos personales</span><strong>{money(gastosPersonales)}</strong></div>
+              </div>
+              <p className="admin-hint">Dinero del negocio = capital inicial − lo que compraste con él + lo que vuelve al vender esa mercancía − gastos del negocio.</p>
+              <p className="admin-hint">Dinero para reinvertir = el {reinvestPercent}% de la ganancia del negocio − lo que compraste con él + lo que vuelve al vender esa mercancía. Ese dinero es tuyo: lo que ganes con la mercancía que compres con él es 100% tuyo y va directo a «Puedes retirar», sin repartirse.</p>
+              <p className="admin-hint">Puedes retirar = el {100 - reinvestPercent}% de la ganancia del negocio + la ganancia de tu dinero para reinvertir − tus gastos personales. Solo cuentan los pedidos «Pagado» que no estén cancelados.</p>
+            </Collapsible>
 
-    {toast && <div className={`admin-toast ${toast.kind}`} role="status">{toast.kind === 'ok' ? <CircleCheck/> : <TriangleAlert/>}<span>{toast.message}</span><button onClick={() => setToast(null)} aria-label="Cerrar aviso"><X/></button></div>}
+            <div className="seg-tabs">
+              <button type="button" className={financeView === 'compras' ? 'active' : ''} onClick={() => setFinanceView('compras')}>Compras ({data.purchases.length})</button>
+              <button type="button" className={financeView === 'gastos' ? 'active' : ''} onClick={() => setFinanceView('gastos')}>Gastos ({data.expenses.length})</button>
+            </div>
 
-    {viewingOrder && <OrderDetail order={viewingOrder} money={money} busy={busy} brand={invoiceContext.brand} onClose={() => setViewingOrderId(null)} onStatus={setOrderStatus} onDownload={download} onShare={share} onDelete={removeOrder}/>}
+            {financeView === 'compras' && <>
+              <p className="admin-hint"><Layers size={14} />Cada compra es un lote con su costo. Al vender, sale primero del lote más viejo («Se vende ahora»); cuando se acaba, sigue el próximo.</p>
+              <label className="search-field admin-search"><Search size={16} /><input value={purchaseQuery} onChange={(event) => { setPurchaseQuery(event.target.value); setPurchaseLimit(15) }} placeholder="Buscar compra por producto, opción o nota..." /></label>
+              <div className="admin-table">
+                {filteredPurchases.slice(0, purchaseLimit).map((purchase) => (
+                  <LotRow key={purchase.id} lot={purchase} status={statusById.get(purchase.id) ?? 'espera'} showProduct general={!purchase.option && Boolean(productById.get(purchase.productId)?.optionStock)} busy={busy} onDelete={() => confirmDeletePurchase(purchase)} />
+                ))}
+                {!filteredPurchases.length && <p className="admin-empty">{data.purchases.length ? 'Ninguna compra coincide.' : 'Todavía no has registrado compras.'}</p>}
+                {filteredPurchases.length > purchaseLimit && <button className="ghost-button" onClick={() => setPurchaseLimit((limit) => limit + 30)}>Ver más compras ({filteredPurchases.length - purchaseLimit} más)</button>}
+              </div>
+            </>}
 
-    {editing && <div className="modal-wrap" onClick={(event) => { if (event.target === event.currentTarget && !busy) setEditing(null) }}><form className="product-modal" onSubmit={handleProduct}><button type="button" className="modal-close" onClick={() => setEditing(null)} aria-label="Cerrar"><X/></button><span>CATÁLOGO</span><h2>{editing.id ? 'Editar producto' : 'Nuevo producto'}</h2>
-      <div className="product-editor">
-        <div className="image-editor"><div className="image-preview">{editing.image ? <img src={editing.image} alt="Vista previa"/> : <div className="image-empty"><ImagePlus/><p>Sin imagen</p></div>}{uploading === 'product' && <div className="image-loading"><LoaderCircle/>Subiendo...</div>}</div><label className="upload-zone"><ImagePlus/>{editing.image ? 'Cambiar imagen' : 'Subir imagen'}<input hidden type="file" accept="image/*" disabled={uploading !== null} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) uploadImage(file, 'product') }}/></label><label className="small-label">o pega una URL<input value={editing.image} onChange={(event) => setEditing({ ...editing, image: event.target.value })} placeholder="https://..."/></label></div>
-        <div className="form-grid">
-          <label className="wide">Nombre<input required value={editing.name} maxLength={120} onChange={(event) => setEditing({ ...editing, name: event.target.value })} placeholder="Ej. Aceite Luz Lenta"/></label>
-          <label className="wide">Categoría<input required list="category-options" value={editing.category} maxLength={60} onChange={(event) => setEditing({ ...editing, category: event.target.value })} placeholder="Rostro, Cuerpo, Aromas..."/><datalist id="category-options">{categories.map((item) => <option key={item} value={item}/>)}</datalist></label>
-          <label>Precio ({currency})<input required inputMode="decimal" value={editing.price} onChange={(event) => setEditing({ ...editing, price: event.target.value.replace(/[^\d.,]/g, '') })} placeholder="0.00"/><small className="field-hint">Vista en tienda: {money(toCents(editing.price))}</small></label>
-          <label>Existencias<input required type="number" min="0" step="1" inputMode="numeric" value={editing.stock} onChange={(event) => setEditing({ ...editing, stock: event.target.value })}/></label>
-          <label className="wide">Descripción<textarea required rows={4} maxLength={2000} value={editing.description} onChange={(event) => setEditing({ ...editing, description: event.target.value })} placeholder="Qué es, para qué sirve y qué la hace especial."/></label>
-          <label className="check-field wide"><input type="checkbox" checked={editing.featured} onChange={(event) => setEditing({ ...editing, featured: event.target.checked })}/>Producto destacado <small>(aparece primero con la etiqueta «Favorito»)</small></label>
-        </div>
-      </div>
-      <div className="modal-actions"><button type="button" className="ghost-button" onClick={() => setEditing(null)}>Cancelar</button><button className="primary-button" disabled={busy || uploading !== null}><Save/>{busy ? 'Guardando...' : 'Guardar producto'}</button></div></form></div>}
+            {financeView === 'gastos' && (
+              <div className="admin-table">
+                {data.expenses.slice(0, expenseLimit).map((expense) => <div className="admin-row" key={expense.id}>
+                  <div><strong>{expense.description}</strong><span>{dateFmt(expense.createdAt)}</span></div>
+                  <span className={`status-pill status-${expense.type}`}>{expense.type === 'negocio' ? 'Negocio' : 'Personal'}</span>
+                  <strong>{money(expense.amount)}</strong>
+                  <div className="admin-row-actions">
+                    <button onClick={() => { if (window.confirm('¿Borrar este gasto?')) withBusy(() => deleteExpense({ data: expense.id })) }}><Trash2 size={15} /></button>
+                  </div>
+                </div>)}
+                {!data.expenses.length && <p className="admin-empty">Todavía no has registrado gastos.</p>}
+                {data.expenses.length > expenseLimit && <button className="ghost-button" onClick={() => setExpenseLimit((limit) => limit + 30)}>Ver más gastos ({data.expenses.length - expenseLimit} más)</button>}
+              </div>
+            )}
 
-    {editingCustomer && <div className="modal-wrap" onClick={(event) => { if (event.target === event.currentTarget && !busy) setEditingCustomer(null) }}><form className="product-modal narrow" onSubmit={handleCustomer}><button type="button" className="modal-close" onClick={() => setEditingCustomer(null)} aria-label="Cerrar"><X/></button><span>COMUNIDAD</span><h2>{editingCustomer.id ? 'Editar cliente' : 'Registrar cliente'}</h2><div className="form-grid"><label className="wide">Nombre completo<input required value={editingCustomer.name} onChange={(event) => setEditingCustomer({ ...editingCustomer, name: event.target.value })}/></label><label>Teléfono<input type="tel" value={editingCustomer.phone} onChange={(event) => setEditingCustomer({ ...editingCustomer, phone: event.target.value })}/></label><label>Correo<input type="email" value={editingCustomer.email} onChange={(event) => setEditingCustomer({ ...editingCustomer, email: event.target.value })}/></label><label className="wide">Dirección<input value={editingCustomer.address} onChange={(event) => setEditingCustomer({ ...editingCustomer, address: event.target.value })}/></label><label className="wide">Notas internas<textarea rows={3} value={editingCustomer.notes} onChange={(event) => setEditingCustomer({ ...editingCustomer, notes: event.target.value })} placeholder="Preferencias, alergias a ingredientes, fechas especiales..."/></label></div><div className="modal-actions"><button type="button" className="ghost-button" onClick={() => setEditingCustomer(null)}>Cancelar</button><button className="primary-button" disabled={busy}><Save/>{busy ? 'Guardando...' : 'Guardar cliente'}</button></div></form></div>}
-  </div>
-}
+            <Collapsible title="Configuración (capital inicial y % que se reinvierte)">
+              <div className="form-row">
+                <label className="content-field"><span>Capital inicial (RD$)</span><input type="number" min={0} step="0.01" value={financeSettings.capitalInicial} onChange={(event) => setFinanceSettings((current) => ({ ...current, capitalInicial: event.target.value }))} /></label>
+                <label className="content-field"><span>% que se reinvierte</span><input type="number" min={0} max={100} value={financeSettings.reinvestPercent} onChange={(event) => setFinanceSettings((current) => ({ ...current, reinvestPercent: event.target.value }))} /></label>
+              </div>
+              <button className="primary-button" disabled={busy} onClick={handleSaveFinanceSettings}><Check size={16} />{busy ? 'Guardando…' : 'Guardar configuración'}</button>
+            </Collapsible>
+          </section>
+        )}
 
-function toDraft(product: Product): ProductDraft {
-  return { id: product.id, name: product.name, category: product.category, description: product.description, image: product.image, featured: product.featured, price: (product.price / 100).toFixed(2), stock: String(product.stock) }
-}
+        {tab === 'catalogo' && (
+          <section>
+            <div className="admin-section-head">
+              <h2>Productos</h2>
+              <button className="primary-button" onClick={() => { setError(''); setEditing(emptyDraft()) }}><Plus size={16} />Nuevo producto</button>
+            </div>
+            <label className="search-field admin-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar producto u opción..." /></label>
+            <div className="cat-filters">
+              {CATALOG_FILTERS.map((filter) => {
+                const count = data.products.filter((product) => matchesCatalogFilter(product, filter.id)).length
+                if (filter.id !== 'todos' && count === 0) return null
+                return <button type="button" key={filter.id} className={`${catalogFilter === filter.id ? 'active' : ''} ${filter.id === 'sincosto' ? 'warn' : ''}`} onClick={() => setCatalogFilter(filter.id)}>{filter.label} <b>{count}</b></button>
+              })}
+              <select value={catalogCategory} onChange={(event) => setCatalogCategory(event.target.value)} aria-label="Categoría">
+                <option value="">Todas las categorías</option>
+                {CATEGORIES.filter((category) => data.products.some((product) => product.category === category)).map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </div>
+            <div className="admin-table">
+              {catalogProducts.map((product) => {
+                const options = parseOptions(product.options)
+                const tracking = tracksOptionStock(product)
+                const range = priceRange(product)
+                const ranged = range.min !== range.max
+                const margin = !ranged && product.price > 0 && product.cost > 0 ? Math.round(((product.price - product.cost) / product.price) * 100) : null
+                const noCost = uncostedIds.has(product.id)
+                const lotCount = lotsByProduct.get(product.id)?.length ?? 0
+                return <div className={`prod-row ${!product.active ? 'is-hidden' : ''}`} key={product.id}>
+                  <img src={product.image || '/placeholder.png'} alt="" loading="lazy" />
+                  <div className="prod-row-main">
+                    <div className="prod-row-top">
+                      <strong>{product.name}</strong>
+                      <div className="prod-row-price">
+                        {ranged ? <><small>desde</small><b>{money(range.min)}</b></> : <>{product.originalPrice > product.price && <s>{money(product.originalPrice)}</s>}<b>{money(product.price)}</b></>}
+                      </div>
+                    </div>
+                    <span className="prod-row-cat">{product.category}{options.length > 0 ? ` · ${options.length} ${options.length === 1 ? 'opción' : 'opciones'}` : ''}</span>
+                    <div className="prod-row-pills">
+                      <span className={`pill ${product.stock === 0 ? 'pill-bad' : product.stock <= 3 ? 'pill-warn' : 'pill-ok'}`}>{product.stock === 0 ? 'Agotado' : `${product.stock} en existencia`}</span>
+                      {noCost ? <span className="pill pill-bad">Sin costo registrado</span> : !tracking && <span className="pill">Costo {money(product.cost)}</span>}
+                      {margin !== null && <span className={`pill ${margin < 15 ? 'pill-warn' : ''}`}>Margen {margin}%</span>}
+                      {tracking && <span className="pill pill-info">Cantidad por opción</span>}
+                      {!product.active && <span className="pill">Oculto</span>}
+                    </div>
+                    {tracking && (
+                      <p className="prod-row-options">
+                        {options.map((option) => {
+                          const units = optionStock(product, option)
+                          return <span key={option} className={units === 0 ? 'is-out' : ''}>{option}: <b>{units}</b>{hasOwnPrice(product, option) ? ` · ${money(optionPrice(product, option))}` : ''}</span>
+                        })}
+                      </p>
+                    )}
+                  </div>
+                  <div className="prod-row-actions">
+                    <button type="button" onClick={() => { setError(''); setEditing(toDraft(product)) }}><Pencil size={14} />Editar</button>
+                    <button type="button" onClick={() => openPurchase(product)}><ShoppingBag size={14} />Reponer</button>
+                    <button type="button" disabled={product.stock <= 0} onClick={() => openSale(product)}><ShoppingCart size={14} />Vender</button>
+                    <button type="button" disabled={!lotCount} onClick={() => setLotsProductId(product.id)}><Layers size={14} />Compras</button>
+                    <button type="button" className="danger" aria-label="Enviar a la papelera" onClick={() => { if (window.confirm(`¿Enviar «${product.name}» a la papelera? Deja de verse en la tienda; lo puedes restaurar durante 30 días.`)) withBusy(() => deleteProduct({ data: product.id })) }}><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              })}
+              {!catalogProducts.length && <p className="admin-empty">No hay productos que coincidan.</p>}
+            </div>
+          </section>
+        )}
 
-function OrderTable({ orders, money, onOpen, onStatus, busy, emptyText = 'Todavía no hay pedidos.' }: { orders: Order[]; money: (value: number) => string; onOpen: (order: Order) => void; onStatus: (order: Order, patch: Partial<Pick<Order, 'status' | 'paymentStatus'>>) => void; busy: boolean; emptyText?: string }) {
-  return <div className="table-wrap"><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Fecha</th><th>Estado</th><th>Pago</th><th>Total</th><th className="col-actions"><span className="sr-only">Acciones</span></th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}>
-    <td data-label="Pedido"><button className="order-link" onClick={() => onOpen(order)}>{order.orderNumber}</button><small>{order.items.reduce((sum, item) => sum + item.quantity, 0)} artículos</small></td>
-    <td data-label="Cliente">{order.customerName}<small>{order.phone || order.email}</small></td>
-    <td data-label="Fecha">{shortDate(order.createdAt)}</td>
-    <td data-label="Estado"><select className={statusClass(order.status)} disabled={busy} value={order.status} onChange={(event) => onStatus(order, { status: event.target.value })} aria-label="Estado del pedido">{ORDER_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></td>
-    <td data-label="Pago"><select className={statusClass(order.paymentStatus)} disabled={busy} value={order.paymentStatus} onChange={(event) => onStatus(order, { paymentStatus: event.target.value })} aria-label="Estado del pago">{PAYMENT_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></td>
-    <td data-label="Total"><strong>{money(order.total)}</strong></td>
-    <td className="col-actions" data-label="Acciones"><button className="view-button" onClick={() => onOpen(order)}>Ver detalle <ArrowUpRight/></button></td>
-  </tr>)}</tbody></table>{!orders.length && <div className="empty-admin">{emptyText}</div>}</div>
-}
+        {tab === 'pedidos' && (
+          <section>
+            <div className="admin-section-head">
+              <h2>Pedidos</h2>
+              <button className="primary-button" onClick={() => openSale()}><ShoppingCart size={16} />Registrar venta por fuera</button>
+            </div>
+            <p className="admin-hint">¿Vendiste algo en persona o por WhatsApp? Regístralo con «Registrar venta por fuera»: se descuenta del inventario y se suma a Finanzas.</p>
+            <label className="search-field admin-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por número, cliente o teléfono..." /></label>
+            <div className="admin-table">
+              {filteredOrders.map((order) => <div className="admin-order" key={order.id}>
+                <div className="admin-order-head">
+                  <div><strong>{order.orderNumber}</strong><span>{dateFmt(order.createdAt)}</span></div>
+                  <div className="admin-order-actions">
+                    <button className="icon-button" title="Editar pedido" onClick={() => { setError(''); setEditingOrder({ id: order.id, customerName: order.customerName, email: order.email, phone: order.phone, address: order.address, notes: order.notes, items: order.items.map((item) => ({ ...item, option: item.option ?? optionFromName(item.name) })), discount: order.discount }) }}><Pencil size={15} /></button>
+                    <button className="icon-button" title="Descargar factura (PDF)" disabled={busy} onClick={() => handleDownloadInvoice(order)}><Download size={15} /></button>
+                    <button className="icon-button" title="Compartir factura" disabled={busy} onClick={() => handleShareInvoice(order)}><Share2 size={15} /></button>
+                    <button className="icon-button" title="Enviar a la papelera" onClick={() => { if (window.confirm(order.status === 'Cancelado' ? '¿Enviar este pedido a la papelera?' : '¿Enviar este pedido a la papelera?\n\nOjo: esto NO devuelve las unidades al inventario. Si el pedido no se concretó, primero cámbialo a "Cancelado" (eso sí las devuelve).')) withBusy(() => deleteOrder({ data: order.id })) }}><Trash2 size={15} /></button>
+                  </div>
+                </div>
+                <p className="admin-order-customer">{order.customerName} · {order.phone}{order.address ? ` · ${order.address}` : ''}</p>
+                <ul className="admin-order-items">{order.items.map((item, index) => <li key={`${item.id}-${index}`}>
+                  <div>{item.quantity}× {item.name}<small>Costó {money(item.cost)} cada una · ganancia {money((item.price - item.cost) * item.quantity)}{(item.reinvQty ?? 0) > 0 ? (item.reinvQty === item.quantity ? ' · con el dinero para reinvertir' : ` · ${item.reinvQty} de ${item.quantity} con el dinero para reinvertir`) : ''}</small></div>
+                  <span>{money(item.price * item.quantity)}</span>
+                </li>)}</ul>
+                <div className="admin-order-foot">
+                  <select value={order.status} disabled={busy} onChange={(event) => {
+                    const next = event.target.value
+                    const units = order.items.reduce((sum, item) => sum + item.quantity, 0)
+                    if (next === 'Cancelado' && !window.confirm(`¿Cancelar el pedido ${order.orderNumber}? Sus ${units} unidades vuelven al inventario.`)) return
+                    if (order.status === 'Cancelado' && next !== 'Cancelado' && !window.confirm(`¿Reactivar el pedido ${order.orderNumber}? Se vuelven a sacar ${units} unidades del inventario.`)) return
+                    withBusy(() => updateOrderStatus({ data: { id: order.id, status: next, paymentStatus: order.paymentStatus } }))
+                  }}>
+                    {ORDER_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                  <select value={order.paymentStatus} disabled={busy} onChange={(event) => withBusy(() => updateOrderStatus({ data: { id: order.id, status: order.status, paymentStatus: event.target.value } }))}>
+                    {PAYMENT_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                  {order.discount > 0 && <span className="order-discount-tag">Descuento -{money(order.discount)}</span>}
+                  <strong>{money(order.total)}</strong>
+                </div>
+              </div>)}
+              {!filteredOrders.length && <p className="admin-empty">No hay pedidos que coincidan.</p>}
+            </div>
+          </section>
+        )}
 
-function OrderDetail({ order, money, busy, brand, onClose, onStatus, onDownload, onShare, onDelete }: { order: Order; money: (value: number) => string; busy: boolean; brand: string; onClose: () => void; onStatus: (order: Order, patch: Partial<Pick<Order, 'status' | 'paymentStatus'>>) => void; onDownload: (order: Order) => void; onShare: (order: Order) => void; onDelete: (order: Order) => void }) {
-  const [working, setWorking] = useState<'pdf' | 'share' | null>(null)
-  const wa = whatsappLink(order.phone, `Hola ${order.customerName.split(' ')[0]}, te escribimos de ${brand} sobre tu pedido ${order.orderNumber} (${money(order.total)}).`)
-  const act = async (kind: 'pdf' | 'share') => { setWorking(kind); try { await (kind === 'pdf' ? onDownload(order) : onShare(order)) } finally { setWorking(null) } }
-  const units = order.items.reduce((sum, item) => sum + item.quantity, 0)
-  return <div className="modal-wrap" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}><div className="order-detail" role="dialog" aria-modal="true" aria-label={`Pedido ${order.orderNumber}`}>
-    <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar"><X/></button>
-    <span>PEDIDO · {dateTime(order.createdAt)}</span>
-    <h2>{order.orderNumber}</h2>
-    <div className="detail-status">
-      <label>Estado<select className={statusClass(order.status)} disabled={busy} value={order.status} onChange={(event) => onStatus(order, { status: event.target.value })}>{ORDER_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
-      <label>Pago<select className={statusClass(order.paymentStatus)} disabled={busy} value={order.paymentStatus} onChange={(event) => onStatus(order, { paymentStatus: event.target.value })}>{PAYMENT_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
-    </div>
-    <div className="detail-grid">
-      <section><h3>Cliente</h3><p className="detail-name">{order.customerName}</p>{order.phone && <p>{order.phone}</p>}{order.email && <p><a href={`mailto:${order.email}`}>{order.email}</a></p>}{order.address && <p className="detail-address">{order.address}</p>}<div className="customer-contact">{wa && <a href={wa} target="_blank" rel="noreferrer"><MessageCircle/>WhatsApp</a>}{order.phone && <a href={`tel:${order.phone.replace(/[^\d+]/g, '')}`}><Phone/>Llamar</a>}{order.email && <a href={`mailto:${order.email}?subject=${encodeURIComponent(`Tu pedido ${order.orderNumber} — ${brand}`)}`}><Mail/>Correo</a>}</div></section>
-      <section><h3>Productos · {units} {units === 1 ? 'artículo' : 'artículos'}</h3><ul className="detail-items">{order.items.map((item, index) => <li key={index}>{item.image ? <img src={item.image} alt=""/> : <span className="thumb-empty"/>}<div><strong>{item.name}</strong><small>{item.quantity} × {money(item.price)}</small></div><b>{money(item.price * item.quantity)}</b></li>)}</ul><div className="detail-total"><span>Total</span><strong>{money(order.total)}</strong></div></section>
-    </div>
-    <div className="detail-actions">
-      <button className="primary-button" onClick={() => act('pdf')} disabled={working !== null}>{working === 'pdf' ? <LoaderCircle className="spin"/> : <Download/>}Descargar factura PDF</button>
-      <button className="ghost-button" onClick={() => act('share')} disabled={working !== null}>{working === 'share' ? <LoaderCircle className="spin"/> : <Share2/>}Compartir</button>
-      <button className="danger-button" onClick={() => onDelete(order)} disabled={busy}><Trash2/>Eliminar</button>
-    </div>
-  </div></div>
-}
+        {tab === 'clientes' && (
+          <section>
+            <div className="admin-section-head">
+              <h2>Clientes</h2>
+              <button className="primary-button" onClick={() => setEditingCustomer({ name: '', email: '', phone: '', address: '', notes: '' })}><Plus size={16} />Nuevo cliente</button>
+            </div>
+            <label className="search-field admin-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cliente..." /></label>
+            <div className="admin-table">
+              {filteredCustomers.map((customer) => <div className="admin-row" key={customer.id}>
+                <div><strong>{customer.name}</strong><span>{customer.phone}{customer.email ? ` · ${customer.email}` : ''}</span></div>
+                <div className="admin-row-actions">
+                  <button onClick={() => setEditingCustomer(customer)}><Pencil size={15} /></button>
+                  <button onClick={() => withBusy(() => deleteCustomer({ data: customer.id }))}><Trash2 size={15} /></button>
+                </div>
+              </div>)}
+              {!filteredCustomers.length && <p className="admin-empty">No hay clientes que coincidan.</p>}
+            </div>
+          </section>
+        )}
 
-type InvoiceContext = { brand: string; currency: string; whatsapp: string; email: string }
+        {tab === 'contenido' && (
+          <section>
+            <div className="admin-section-head">
+              <h2>Textos de la tienda</h2>
+              <button className="primary-button" disabled={busy} onClick={handleSaveContent}><Check size={16} />{busy ? 'Guardando…' : 'Guardar cambios'}</button>
+            </div>
+            {CONTENT_GROUPS.map((group) => <div className="content-group" key={group.title}>
+              <h3>{group.title}</h3>
+              {group.hint && <p className="content-hint">{group.hint}</p>}
+              {group.fields.map((field) => <label className="content-field" key={field.key}>
+                <span>{field.label}</span>
+                {field.type === 'textarea'
+                  ? <textarea rows={3} value={contentDraft[field.key] ?? ''} onChange={(event) => setContentDraft((current) => ({ ...current, [field.key]: event.target.value }))} />
+                  : field.type === 'select'
+                  ? <select value={contentDraft[field.key] ?? field.options?.[0]?.value ?? ''} onChange={(event) => setContentDraft((current) => ({ ...current, [field.key]: event.target.value }))}>
+                      {field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  : field.type === 'image'
+                  ? <span className="content-image">
+                      {contentDraft[field.key] && <img src={contentDraft[field.key]} alt="" />}
+                      <span className="upload-button">{uploadingContent === field.key ? 'Subiendo…' : <><Upload size={15} />{contentDraft[field.key] ? 'Cambiar foto' : 'Subir foto'}</>}<input type="file" accept="image/*" hidden disabled={Boolean(uploadingContent)} onChange={(event) => handleContentImage(field.key, event)} /></span>
+                    </span>
+                  : <input value={contentDraft[field.key] ?? ''} onChange={(event) => setContentDraft((current) => ({ ...current, [field.key]: event.target.value }))} />}
+              </label>)}
+            </div>)}
+          </section>
+        )}
 
-function buildOrderText(order: Order, ctx: InvoiceContext) {
-  const money = (value: number) => formatMoney(value, ctx.currency)
-  const lines = order.items.map((item) => `• ${item.quantity}× ${item.name} — ${money(item.price * item.quantity)}`).join('\n')
-  return [
-    `*Pedido ${order.orderNumber}*`,
-    `Cliente: ${order.customerName}`,
-    `Fecha: ${shortDate(order.createdAt)}`,
-    '',
-    lines,
-    '',
-    `*Total: ${money(order.total)}*`,
-    `Estado: ${order.status} · Pago: ${order.paymentStatus}`,
-    '',
-    ctx.brand,
-  ].join('\n')
-}
+        {tab === 'papelera' && (
+          <section>
+            <h2>Papelera</h2>
+            <p className="admin-hint"><AlertTriangle size={14} />Lo que envíes aquí se elimina definitivamente (junto a su imagen) 30 días después.</p>
+            <h3>Productos</h3>
+            <div className="admin-table">
+              {data.trash.products.map((product) => <div className="admin-row" key={product.id}>
+                <div><strong>{product.name}</strong><span>Quedan {product.deletedAt ? daysLeft(product.deletedAt) : 30} días</span></div>
+                <div className="admin-row-actions">
+                  <button onClick={() => withBusy(() => restoreProduct({ data: product.id }))}><RotateCcw size={15} /></button>
+                  <button onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeProduct({ data: product.id })) }}><Trash2 size={15} /></button>
+                </div>
+              </div>)}
+              {!data.trash.products.length && <p className="admin-empty">Vacío.</p>}
+            </div>
+            <h3>Pedidos</h3>
+            <div className="admin-table">
+              {data.trash.orders.map((order) => <div className="admin-row" key={order.id}>
+                <div><strong>{order.orderNumber}</strong><span>Quedan {order.deletedAt ? daysLeft(order.deletedAt) : 30} días</span></div>
+                <div className="admin-row-actions">
+                  <button onClick={() => withBusy(() => restoreOrder({ data: order.id }))}><RotateCcw size={15} /></button>
+                  <button onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeOrder({ data: order.id })) }}><Trash2 size={15} /></button>
+                </div>
+              </div>)}
+              {!data.trash.orders.length && <p className="admin-empty">Vacío.</p>}
+            </div>
+            <h3>Clientes</h3>
+            <div className="admin-table">
+              {data.trash.customers.map((customer) => <div className="admin-row" key={customer.id}>
+                <div><strong>{customer.name}</strong><span>Quedan {customer.deletedAt ? daysLeft(customer.deletedAt) : 30} días</span></div>
+                <div className="admin-row-actions">
+                  <button onClick={() => withBusy(() => restoreCustomer({ data: customer.id }))}><RotateCcw size={15} /></button>
+                  <button onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeCustomer({ data: customer.id })) }}><Trash2 size={15} /></button>
+                </div>
+              </div>)}
+              {!data.trash.customers.length && <p className="admin-empty">Vacío.</p>}
+            </div>
+            {data.trash.images.length > 0 && <>
+              <h3>Imágenes en espera de borrado</h3>
+              <p className="admin-hint">Se borran solas cuando corresponda; esta lista es solo informativa.</p>
+              <div className="admin-table">
+                {data.trash.images.map((image) => <div className="admin-row" key={image.id}><div><strong>{image.path.split('/').pop()}</strong><span>{image.reason} · Quedan {daysLeft(image.deletedAt)} días</span></div></div>)}
+              </div>
+            </>}
+          </section>
+        )}
+      </main>
 
-const statusBadge = (status: string) => {
-  const key = status.toLowerCase()
-  if (key === 'entregado' || key === 'pagado') return 'background:#dcece1;color:#2f6b4b'
-  if (key === 'cancelado' || key === 'reembolsado') return 'background:#f2d9d4;color:#8c3025'
-  if (key === 'enviado' || key === 'preparando') return 'background:#e5e2f3;color:#4b4386'
-  return 'background:#f4e6cf;color:#8a5a1f'
-}
+      {editing && <div className="modal-wrap"><div className="modal-card">
+        <button className="modal-close icon-button" onClick={() => setEditing(null)}><X /></button>
+        <h2>{editing.id ? 'Editar producto' : 'Nuevo producto'}</h2>
+        <form className="product-form" onSubmit={handleSaveProduct}>
+          <fieldset className="form-section">
+            <legend>1 · Foto y nombre</legend>
+            <div className="image-upload">
+              {editing.image && <img src={editing.image} alt="" />}
+              <label className="upload-button">{uploading ? 'Subiendo…' : <><Upload size={15} />{editing.image ? 'Cambiar foto principal' : 'Subir foto principal'}</>}<input type="file" accept="image/*" hidden onChange={handleImageChange} disabled={uploading} /></label>
+            </div>
+            <label>Nombre<input required value={editing.name} onChange={(event) => setEditing((current) => current && { ...current, name: event.target.value })} placeholder="Ej. Aceite facial Luz Lenta" /></label>
+            <label>Categoría
+              <select value={editing.category} onChange={(event) => setEditing((current) => current && { ...current, category: event.target.value })}>
+                {(CATEGORIES.includes(editing.category) ? CATEGORIES : [editing.category, ...CATEGORIES]).map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </label>
+            <label>Descripción<textarea rows={3} value={editing.description} onChange={(event) => setEditing((current) => current && { ...current, description: event.target.value })} /></label>
+          </fieldset>
 
-// Isotipo en SVG plano para la factura (html2canvas no resuelve bien los
-// gradientes con id, así que aquí se usa un color sólido).
-const INVOICE_MARK = '<svg width="34" height="40" viewBox="0 0 240 280" xmlns="http://www.w3.org/2000/svg"><path d="M20 272V120a100 100 0 0 1 200 0v152z" fill="#ba5b46"/><path d="M120 96c0 0-40 48-40 76a40 40 0 0 0 80 0c0-28-40-76-40-76z" fill="#fffaf7"/></svg>'
+          <fieldset className="form-section">
+            <legend>2 · Precio</legend>
+            <div className="form-row">
+              <label>Precio de venta (RD$)<input required type="number" inputMode="decimal" min={0} step="0.01" value={editing.price} onChange={(event) => setEditing((current) => current && { ...current, price: event.target.value })} /></label>
+              <label>Precio anterior (opcional)<input type="number" inputMode="decimal" min={0} step="0.01" value={editing.originalPrice} onChange={(event) => setEditing((current) => current && { ...current, originalPrice: event.target.value })} placeholder="Para mostrar oferta" /></label>
+            </div>
+            <p className="content-hint">Si las opciones de abajo tienen un precio distinto, se lo pones a cada una. Las que no tengan precio propio usan este.</p>
+          </fieldset>
 
-// Factura con la identidad de la marca. Todo texto que viene de clientes se
-// escapa para que nadie pueda inyectar HTML o scripts en el panel.
-function buildOrderHtml(order: Order, ctx: InvoiceContext) {
-  const money = (value: number) => formatMoney(value, ctx.currency)
-  const ink = '#182431'; const clay = '#ba5b46'; const paper = '#f4eee9'; const line = 'rgba(24,36,49,.14)'; const muted = '#6d6e70'
-  const rows = order.items.map((item) => `<tr>
-      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px">${escapeHtml(item.name)}</td>
-      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px;text-align:center">${Number(item.quantity)}</td>
-      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px;text-align:right">${money(item.price)}</td>
-      <td style="padding:13px 10px;border-bottom:1px solid ${line};font-size:14px;text-align:right;font-weight:700">${money(item.price * item.quantity)}</td>
-    </tr>`).join('')
-  const th = `text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.08em;color:${clay};padding:9px 10px;border-bottom:2px solid ${clay}`
-  const badge = (label: string, status: string) => `<span style="display:inline-block;font-size:11px;font-weight:700;padding:5px 14px;border-radius:999px;${statusBadge(status)}">${escapeHtml(label)}</span>`
-  const contact = [ctx.whatsapp && `WhatsApp ${escapeHtml(ctx.whatsapp)}`, ctx.email && escapeHtml(ctx.email)].filter(Boolean).join(' · ')
+          <fieldset className="form-section">
+            <legend>3 · Opciones (colores, diseños o modelos)</legend>
+            <p className="content-hint">Déjalo vacío si el producto es uno solo. Si en esta misma tarjeta hay varios (ej. varios aromas o tamaños), agrégalos aquí — cada uno puede tener su foto, su precio y su cantidad.</p>
+            {editing.options.length > 0 && (
+              <label className="switch-row">
+                <input type="checkbox" checked={editing.optionStock} onChange={(event) => setEditing((current) => current && { ...current, optionStock: event.target.checked })} />
+                <span><b>Cada opción tiene su propia cantidad</b><small>Recomendado. Así sabes cuántas quedan de cada una, y cada compra y venta se cuenta por opción con su propio costo.</small></span>
+              </label>
+            )}
+            {editing.options.map((option, index) => (
+              <div className="option-card" key={option.key}>
+                <div className="option-card-head">
+                  <label className="option-thumb" title="Foto de esta opción">
+                    {uploadingVariant === option.key ? <span>…</span> : option.image ? <img src={option.image} alt="" /> : <Upload size={16} />}
+                    <input type="file" accept="image/*" hidden onChange={(event) => handleVariantImageChange(option.key, event)} disabled={uploadingVariant === option.key} />
+                  </label>
+                  <input className="option-name" value={option.name} onChange={(event) => updateOption(option.key, { name: event.target.value })} placeholder={`Opción ${index + 1} (ej. lavanda)`} aria-label="Nombre de la opción" />
+                  <button type="button" className="icon-button option-remove" aria-label="Quitar opción" onClick={() => { if (!option.originalName || window.confirm(`¿Quitar la opción «${option.originalName}»?`)) removeOption(option.key) }}><X size={16} /></button>
+                </div>
+                <div className="option-card-grid">
+                  <label>Precio<input type="number" inputMode="decimal" min={0} step="0.01" value={option.price} onChange={(event) => updateOption(option.key, { price: event.target.value })} placeholder={editing.price ? `Igual: ${money(cents(editing.price))}` : 'Igual al general'} /></label>
+                  {editing.optionStock && (
+                    <label>Cantidad<input type="number" inputMode="numeric" min={0} value={editing.id ? option.stock : '0'} disabled={!editing.id} onChange={(event) => updateOption(option.key, { stock: event.target.value })} /></label>
+                  )}
+                </div>
+                <input value={option.description} onChange={(event) => updateOption(option.key, { description: event.target.value })} placeholder="Descripción de esta opción (opcional)" aria-label="Descripción de la opción" />
+                {option.image && <button type="button" className="variant-remove-button" onClick={() => updateOption(option.key, { image: '' })}>Quitar foto</button>}
+              </div>
+            ))}
+            <button type="button" className="ghost-button add-option" onClick={() => setEditing((current) => current && { ...current, options: [...current.options, emptyOption()] })}><Plus size={15} />Agregar opción</button>
+          </fieldset>
 
-  return `<div id="rc-factura" style="width:720px;background:${paper};color:${ink};font-family:'Manrope',system-ui,sans-serif;padding:48px;box-sizing:border-box">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid ${ink};padding-bottom:22px;margin-bottom:28px">
-      <div style="display:flex;gap:14px;align-items:center">
-        ${INVOICE_MARK}
-        <div>
-          <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:700;letter-spacing:-.02em">${escapeHtml(ctx.brand)}</div>
-          <div style="font-size:12px;color:${muted};margin-top:4px">Cuidado personal · hecho con intención</div>
-        </div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:20px;font-weight:800;color:${clay};letter-spacing:.04em">PEDIDO</div>
-        <div style="font-size:12px;color:${muted};margin-top:4px">N.º <strong style="color:${ink}">${escapeHtml(order.orderNumber)}</strong></div>
-        <div style="font-size:12px;color:${muted}">Fecha: ${shortDate(order.createdAt)}</div>
-      </div>
-    </div>
-    <div style="display:flex;justify-content:space-between;gap:24px;margin-bottom:26px">
-      <div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${muted};margin-bottom:6px">Cliente</div>
-        <div style="font-size:16px;font-weight:700">${escapeHtml(order.customerName)}</div>
-        <div style="font-size:13px;color:${muted};margin-top:2px">${escapeHtml(order.phone)}${order.email ? ' · ' + escapeHtml(order.email) : ''}</div>
-        ${order.address ? `<div style="font-size:13px;color:${muted};margin-top:2px;max-width:340px;white-space:pre-line">${escapeHtml(order.address)}</div>` : ''}
-      </div>
-      <div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-        ${badge(order.status.toUpperCase(), order.status)}
-        ${badge(`PAGO ${order.paymentStatus.toUpperCase()}`, order.paymentStatus)}
-      </div>
-    </div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
-      <thead><tr>
-        <th style="${th}">Producto</th>
-        <th style="${th};text-align:center">Cant.</th>
-        <th style="${th};text-align:right">Precio</th>
-        <th style="${th};text-align:right">Total</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><td style="padding:16px 10px 4px;border-top:2px solid ${ink};font-weight:800;font-size:13px;color:${muted};text-transform:uppercase;letter-spacing:.05em">Total</td><td style="padding:16px 10px 4px;border-top:2px solid ${ink};font-weight:800;font-size:22px;text-align:right;font-family:'Syne',sans-serif">${money(order.total)}</td></tr></table>
-    <div style="border-top:1px solid ${line};margin-top:28px;padding-top:16px;font-size:11px;color:${muted};text-align:center;line-height:1.7">
-      Gracias por hacer espacio para este ritual.${contact ? `<br>${contact}` : ''}
-    </div>
-  </div>`
-}
+          <fieldset className="form-section">
+            <legend>4 · Cantidad en existencia</legend>
+            {!editing.id ? (
+              <p className="admin-hint"><AlertTriangle size={14} />Un producto nuevo empieza en 0. Al guardar se abre «Reponer» para que pongas cuántas compraste y a cuánto — así el costo queda registrado.</p>
+            ) : editing.optionStock && editing.options.length > 0 ? (
+              <p className="option-total">Total: <b>{editingSum}</b> unidades (la suma de las opciones){editingOriginal && !editingOriginal.optionStock && editingOriginal.stock !== editingSum ? <span> · antes había {editingOriginal.stock} en total: reparte esa cantidad entre las opciones</span> : null}</p>
+            ) : (
+              <>
+                <label>Existencias<input required type="number" inputMode="numeric" min={0} value={editing.stock} onChange={(event) => setEditing((current) => current && { ...current, stock: event.target.value })} /></label>
+              </>
+            )}
+            {editing.id && <p className="content-hint">Estos números solo corrigen el conteo (no suman dinero ni costo). Para mercancía nueva usa «Reponer».</p>}
+          </fieldset>
 
-// Renderiza la factura en un iframe aislado (sin las hojas de estilo del
-// sitio) para que html2canvas capture solo los estilos de arriba. El iframe
-// se retira siempre, incluso si algo falla.
-async function renderOrderCanvas(order: Order, ctx: InvoiceContext) {
-  const { default: html2canvas } = await import('html2canvas')
-  const iframe = document.createElement('iframe')
-  Object.assign(iframe.style, { position: 'fixed', top: '0', left: '-99999px', width: '720px', height: '10px', border: '0' })
-  document.body.appendChild(iframe)
-  try {
-    const idoc = iframe.contentDocument
-    if (!idoc) throw new Error('No se pudo preparar la factura.')
-    idoc.open()
-    idoc.write('<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700&family=Manrope:wght@400;600;700;800&display=swap"></head><body style="margin:0;padding:0"></body></html>')
-    idoc.close()
-    idoc.body.innerHTML = buildOrderHtml(order, ctx)
-    if (idoc.fonts?.ready) await Promise.race([idoc.fonts.ready, new Promise((resolve) => setTimeout(resolve, 600))])
-    return await html2canvas(idoc.body.firstElementChild as HTMLElement, { scale: 2, backgroundColor: '#f4eee9', windowWidth: 720 })
-  } finally {
-    document.body.removeChild(iframe)
-  }
-}
+          <fieldset className="form-section">
+            <legend>5 · En la tienda</legend>
+            <div className="form-checks">
+              <label><input type="checkbox" checked={editing.active} onChange={(event) => setEditing((current) => current && { ...current, active: event.target.checked })} />Visible en la tienda</label>
+              <label><input type="checkbox" checked={editing.featured} onChange={(event) => setEditing((current) => current && { ...current, featured: event.target.checked })} />Destacado</label>
+              <label><input type="checkbox" checked={editing.isNew} onChange={(event) => setEditing((current) => current && { ...current, isNew: event.target.checked })} />Nuevo</label>
+              <label><input type="checkbox" checked={editing.bestSeller} onChange={(event) => setEditing((current) => current && { ...current, bestSeller: event.target.checked })} />Más vendido</label>
+            </div>
+          </fieldset>
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button full" disabled={busy || uploading || Boolean(uploadingVariant)}>{busy ? 'Guardando…' : 'Guardar producto'}</button>
+        </form>
+      </div></div>}
 
-async function downloadOrder(order: Order, ctx: InvoiceContext) {
-  const canvas = await renderOrderCanvas(order, ctx)
-  const pdf = new jsPDF({ unit: 'pt', format: 'a4' })
-  const pageWidth = pdf.internal.pageSize.getWidth()
-  const pageHeight = pdf.internal.pageSize.getHeight()
-  const imgWidth = pageWidth - 40
-  const imgHeight = imgWidth * (canvas.height / canvas.width)
-  // Si la factura es más alta que una página (muchos productos), se reparte en varias.
-  const image = canvas.toDataURL('image/png')
-  let offset = 0
-  while (offset < imgHeight) {
-    if (offset > 0) pdf.addPage()
-    pdf.addImage(image, 'PNG', 20, 20 - offset, imgWidth, imgHeight)
-    offset += pageHeight - 40
-  }
-  pdf.save(`Pedido-${order.orderNumber}.pdf`)
-}
+      {editingCustomer && <div className="modal-wrap"><div className="modal-card">
+        <button className="modal-close icon-button" onClick={() => setEditingCustomer(null)}><X /></button>
+        <h2>{editingCustomer.id ? 'Editar cliente' : 'Nuevo cliente'}</h2>
+        <form className="product-form" onSubmit={handleSaveCustomer}>
+          <label>Nombre<input required value={editingCustomer.name} onChange={(event) => setEditingCustomer((current) => current && { ...current, name: event.target.value })} /></label>
+          <label>Teléfono<input value={editingCustomer.phone} onChange={(event) => setEditingCustomer((current) => current && { ...current, phone: event.target.value })} /></label>
+          <label>Correo<input type="email" value={editingCustomer.email} onChange={(event) => setEditingCustomer((current) => current && { ...current, email: event.target.value })} /></label>
+          <label>Dirección<input value={editingCustomer.address} onChange={(event) => setEditingCustomer((current) => current && { ...current, address: event.target.value })} /></label>
+          <label>Notas<textarea rows={3} value={editingCustomer.notes} onChange={(event) => setEditingCustomer((current) => current && { ...current, notes: event.target.value })} /></label>
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button full" disabled={busy}>{busy ? 'Guardando…' : 'Guardar cliente'}</button>
+        </form>
+      </div></div>}
 
-async function shareOrder(order: Order, ctx: InvoiceContext) {
-  const text = buildOrderText(order, ctx)
-  // Sin Web Share API terminamos en WhatsApp: la ventana se abre ya, dentro
-  // del clic, para que el navegador no la bloquee como pop-up.
-  const canShareNatively = typeof navigator.share === 'function'
-  const popup = canShareNatively ? null : window.open('', '_blank')
-  try {
-    const canvas = await renderOrderCanvas(order, ctx)
-    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
-    if (blob) {
-      const file = new File([blob], `Pedido-${order.orderNumber}.png`, { type: 'image/png' })
-      if (navigator.canShare?.({ files: [file] })) {
-        popup?.close()
-        await navigator.share({ files: [file], title: `Pedido ${order.orderNumber}`, text })
-        return
-      }
-    }
-  } catch (caught) {
-    if (caught instanceof Error && caught.name === 'AbortError') { popup?.close(); return }
-  }
-  const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`
-  if (navigator.share) {
-    try { popup?.close(); await navigator.share({ title: `Pedido ${order.orderNumber}`, text }); return }
-    catch (caught) { if (caught instanceof Error && caught.name === 'AbortError') return }
-  }
-  // Último recurso: WhatsApp con el texto del pedido.
-  if (popup && !popup.closed) { popup.location.href = waUrl; return }
-  if (!window.open(waUrl, '_blank')) throw new Error('Tu navegador bloqueó la ventana para compartir. Usa «Descargar factura PDF» y envíala manualmente.')
-}
+      {editingOrder && <div className="modal-wrap"><div className="modal-card">
+        <button className="modal-close icon-button" onClick={() => setEditingOrder(null)}><X /></button>
+        <h2>Editar pedido</h2>
+        <p>Corrige los datos del cliente o los números de este pedido. Si cambias una cantidad o quitas un producto, el inventario se ajusta solo.</p>
+        <form className="product-form" onSubmit={handleSaveOrder}>
+          <label>Nombre del cliente<input required value={editingOrder.customerName} onChange={(event) => setEditingOrder((current) => current && { ...current, customerName: event.target.value })} /></label>
+          <div className="form-row">
+            <label>Teléfono<input value={editingOrder.phone} onChange={(event) => setEditingOrder((current) => current && { ...current, phone: event.target.value })} /></label>
+            <label>Correo (opcional)<input value={editingOrder.email} onChange={(event) => setEditingOrder((current) => current && { ...current, email: event.target.value })} /></label>
+          </div>
+          <label>Dirección<input value={editingOrder.address} onChange={(event) => setEditingOrder((current) => current && { ...current, address: event.target.value })} /></label>
+          <label>Notas (opcional)<input value={editingOrder.notes} onChange={(event) => setEditingOrder((current) => current && { ...current, notes: event.target.value })} /></label>
+          <label>Productos del pedido <small className="order-edit-legend">nombre · cantidad · precio c/u</small></label>
+          {editingOrder.items.map((item, index) => (
+            <div className="order-edit-item" key={`${item.id}-${index}`}>
+              <input value={item.name} onChange={(event) => setEditingOrder((current) => current && { ...current, items: current.items.map((row, rowIndex) => rowIndex === index ? { ...row, name: event.target.value } : row) })} />
+              <input type="number" min={1} value={item.quantity} onChange={(event) => setEditingOrder((current) => current && { ...current, items: current.items.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: Number(event.target.value) } : row) })} />
+              <input type="number" min={0} step="0.01" value={item.price / 100} onChange={(event) => setEditingOrder((current) => current && { ...current, items: current.items.map((row, rowIndex) => rowIndex === index ? { ...row, price: Math.round(Number(event.target.value) * 100) } : row) })} />
+              <button type="button" className="icon-button" disabled={editingOrder.items.length <= 1} onClick={() => setEditingOrder((current) => current && { ...current, items: current.items.filter((_, rowIndex) => rowIndex !== index) })}><X size={14} /></button>
+            </div>
+          ))}
+          {(() => {
+            const subtotal = editingOrder.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+            const discount = Math.min(subtotal, editingOrder.discount)
+            return <>
+              <label>Descuento (RD$, opcional)<input type="number" min={0} step="0.01" value={editingOrder.discount / 100} onChange={(event) => setEditingOrder((current) => current && { ...current, discount: Math.round(Math.max(0, Number(event.target.value)) * 100) })} /></label>
+              <p className="admin-hint"><AlertTriangle size={14} />Se resta del subtotal y queda reflejado como una línea aparte en la factura — no afecta el precio guardado de cada producto.</p>
+              <p className="order-edit-total">Subtotal: {money(subtotal)}{discount > 0 && <> · Descuento: -{money(discount)}</>} · Nuevo total: <strong>{money(subtotal - discount)}</strong></p>
+            </>
+          })()}
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button full" disabled={busy}>{busy ? 'Guardando…' : 'Guardar cambios'}</button>
+        </form>
+      </div></div>}
 
-type FieldKind = 'text' | 'textarea' | 'image' | 'email' | 'tel' | 'currency'
-type Field = { key: string; label: string; kind?: FieldKind; hint?: string; placeholder?: string; wide?: boolean }
+      {editingPurchase && <div className="modal-wrap"><div className="modal-card">
+        <button className="modal-close icon-button" onClick={() => setEditingPurchase(null)}><X /></button>
+        <h2>Reponer (registrar compra)</h2>
+        <p>Pon cuántas compraste y a cuánto te salió cada una. Se suma a la existencia y se saca del dinero que elijas abajo. Cada compra queda como un lote con su propio costo.</p>
+        <form className="product-form" onSubmit={handleSavePurchase}>
+          <label>Producto
+            <select required value={editingPurchase.productId} onChange={(event) => setEditingPurchase((current) => current && { ...purchaseDraftFor(productById.get(Number(event.target.value))), notes: current.notes, fund: current.fund })}>
+              <option value="" disabled>Selecciona un producto</option>
+              {[...data.products].sort((a, b) => a.name.localeCompare(b.name)).map((product) => <option key={product.id} value={product.id}>{product.name} (hay {product.stock})</option>)}
+            </select>
+          </label>
+          {purchaseProduct && purchaseTracking ? (
+            <>
+              <label>Costo igual para todas (opcional)<input type="number" inputMode="decimal" min={0} step="0.01" value={editingPurchase.sameCost} onChange={(event) => setEditingPurchase((current) => current && { ...current, sameCost: event.target.value })} placeholder="Ej. 26 (se usa donde no pongas costo)" /></label>
+              <div className="restock-table">
+                <div className="restock-head"><span>Opción</span><span>Cant.</span><span>Costo c/u</span></div>
+                {editingPurchase.lines.map((line, index) => {
+                  const variant = purchaseProduct.variantImages?.find((entry) => entry.option === line.option)
+                  return <div className="restock-row" key={line.option}>
+                    <div className="restock-option">{variant?.image ? <img src={variant.image} alt="" /> : null}<span>{line.option}<small>hay {optionStock(purchaseProduct, line.option)}</small></span></div>
+                    <input type="number" inputMode="numeric" min={0} value={line.quantity} onChange={(event) => updatePurchaseLine(index, { quantity: event.target.value })} placeholder="0" aria-label={`Cantidad de ${line.option}`} />
+                    <input type="number" inputMode="decimal" min={0} step="0.01" value={line.unitCost} onChange={(event) => updatePurchaseLine(index, { unitCost: event.target.value })} placeholder={editingPurchase.sameCost || 'RD$'} aria-label={`Costo de ${line.option}`} />
+                  </div>
+                })}
+              </div>
+              <p className="content-hint">Deja en blanco las opciones que no compraste. Cada opción con cantidad queda como su propio lote.</p>
+            </>
+          ) : (
+            <>
+              <div className="form-row">
+                <label>Cantidad comprada<input required type="number" inputMode="numeric" min={1} value={editingPurchase.lines[0]?.quantity ?? ''} onChange={(event) => updatePurchaseLine(0, { quantity: event.target.value })} /></label>
+                <label>Costo por unidad (RD$)<input required type="number" inputMode="decimal" min={0} step="0.01" value={editingPurchase.lines[0]?.unitCost ?? ''} onChange={(event) => updatePurchaseLine(0, { unitCost: event.target.value })} /></label>
+              </div>
+              {purchaseProduct && parseOptions(purchaseProduct.options).length > 1 && <p className="admin-hint"><AlertTriangle size={14} />Este producto tiene opciones pero comparten una sola cantidad. Si cada una tiene su propia cantidad o costo, actívalo en «Editar» → «Cada opción tiene su propia cantidad».</p>}
+            </>
+          )}
+          <label>Notas (opcional)<input value={editingPurchase.notes} onChange={(event) => setEditingPurchase((current) => current && { ...current, notes: event.target.value })} placeholder="Ej. proveedor, factura..." /></label>
+          <div className="fund-choice" role="radiogroup" aria-label="¿Con qué dinero?">
+            <span className="fund-choice-title">¿Con qué dinero?</span>
+            {(['capital', 'reinversion'] as const).map((fund) => {
+              const balance = fund === 'capital' ? capitalDisponible : dineroReinvertir
+              const left = balance - purchaseTotal
+              return <label key={fund} className={`switch-row fund-option ${editingPurchase.fund === fund ? 'is-active' : ''}`}>
+                <input type="radio" name="purchase-fund" value={fund} checked={editingPurchase.fund === fund} onChange={() => setEditingPurchase((current) => current && { ...current, fund })} />
+                <span><b>{FUND_LABEL[fund]}</b><small>Hay {money(balance)}{purchaseTotal > 0 && <> · después quedan <em className={left < 0 ? 'is-negative' : ''}>{money(left)}</em></>}</small></span>
+              </label>
+            })}
+          </div>
+          {purchaseTotal > 0 && <p className="order-edit-total">Total de la compra: <strong>{money(purchaseTotal)}</strong></p>}
+          {purchaseTotal > 0 && (editingPurchase.fund === 'capital' ? capitalDisponible : dineroReinvertir) - purchaseTotal < 0 && <p className="admin-hint"><AlertTriangle size={14} />No alcanza: el {FUND_LABEL[editingPurchase.fund].toLowerCase()} quedaría en negativo. Revisa los números o elige el otro dinero.</p>}
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button full" disabled={busy || !editingPurchase.productId}>{busy ? 'Guardando…' : 'Registrar compra'}</button>
+        </form>
+      </div></div>}
 
-const CONTENT_GROUPS: Array<{ title: string; description: string; fields: Field[] }> = [
-  { title: 'Tienda y contacto', description: 'Datos que aparecen en el pie de página, los botones de WhatsApp y las facturas.', fields: [
-    { key: 'brandName', label: 'Nombre de la marca' },
-    { key: 'currency', label: 'Moneda de los precios', kind: 'currency', hint: 'Los precios guardados no cambian de valor, solo el símbolo con que se muestran.' },
-    { key: 'whatsapp', label: 'Número de WhatsApp', kind: 'tel', placeholder: '1 809 000 0000', hint: 'Con código de país. Se usa en todos los botones de WhatsApp de la tienda.' },
-    { key: 'contactEmail', label: 'Correo de contacto (público)', kind: 'email', placeholder: 'hola@tumarca.com' },
-    { key: 'instagram', label: 'Instagram', placeholder: '@ritualcobre' },
-    { key: 'schedule', label: 'Horario de atención' },
-  ] },
-  { title: 'Notificaciones', description: 'Correo privado: no se muestra en la tienda.', fields: [
-    { key: 'notificationEmail', label: 'Correo para avisos de nuevos pedidos', kind: 'email', placeholder: 'pedidos@tudominio.com', hint: 'Cada pedido nuevo envía un correo automático con los detalles a esta dirección.', wide: true },
-  ] },
-  { title: 'Portada principal', description: 'Lo primero que ve el cliente al entrar.', fields: [
-    { key: 'eyebrow', label: 'Texto superior' },
-    { key: 'heroCta', label: 'Texto del botón principal' },
-    { key: 'heroTitle', label: 'Título principal', wide: true },
-    { key: 'heroDescription', label: 'Descripción', kind: 'textarea', wide: true },
-    { key: 'heroBadge', label: 'Texto del círculo lavanda' },
-    { key: 'heroImage', label: 'Imagen principal', kind: 'image', wide: true },
-    { key: 'trust1', label: 'Garantía 1' },
-    { key: 'trust2', label: 'Garantía 2' },
-    { key: 'trust3', label: 'Garantía 3' },
-  ] },
-  { title: 'Navegación', description: 'Enlaces del menú superior en computadora.', fields: [
-    { key: 'navCatalog', label: 'Enlace al catálogo' },
-    { key: 'navBenefits', label: 'Enlace a beneficios' },
-    { key: 'navContact', label: 'Enlace a contacto' },
-  ] },
-  { title: 'Beneficios', description: 'Sección «Manifiesto».', fields: [
-    { key: 'benefitsTitle', label: 'Título de la sección', wide: true },
-    { key: 'benefit1Title', label: 'Beneficio 1 — título' }, { key: 'benefit1Text', label: 'Beneficio 1 — texto' },
-    { key: 'benefit2Title', label: 'Beneficio 2 — título' }, { key: 'benefit2Text', label: 'Beneficio 2 — texto' },
-    { key: 'benefit3Title', label: 'Beneficio 3 — título' }, { key: 'benefit3Text', label: 'Beneficio 3 — texto' },
-  ] },
-  { title: 'Catálogo e historia', description: 'Encabezado del catálogo y sección «Nuestra historia».', fields: [
-    { key: 'catalogTitle', label: 'Título del catálogo' },
-    { key: 'storyTitle', label: 'Título de la historia' },
-    { key: 'catalogDescription', label: 'Descripción del catálogo', kind: 'textarea', wide: true },
-    { key: 'storyText', label: 'Texto de la historia', kind: 'textarea', wide: true },
-    { key: 'storyImage', label: 'Imagen de la historia', kind: 'image', wide: true },
-  ] },
-  { title: 'Bolsa, pedido y pie de página', description: 'Textos del carrito, del formulario de pedido y del pie.', fields: [
-    { key: 'cartTitle', label: 'Título de la bolsa' },
-    { key: 'checkoutTitle', label: 'Título del formulario de pedido' },
-    { key: 'footerText', label: 'Frase del pie de página', wide: true },
-    { key: 'developerCredit', label: 'Crédito del desarrollador', wide: true },
-  ] },
-  { title: 'Políticas', description: 'Página /politicas. Deja una línea en blanco para separar párrafos.', fields: [
-    { key: 'policiesUpdated', label: 'Fecha de última actualización', wide: true },
-    { key: 'policyPrivacy', label: 'Privacidad', kind: 'textarea', wide: true },
-    { key: 'policyOrders', label: 'Pedidos y pagos', kind: 'textarea', wide: true },
-    { key: 'policyShipping', label: 'Envíos y entregas', kind: 'textarea', wide: true },
-    { key: 'policyReturns', label: 'Cambios y devoluciones', kind: 'textarea', wide: true },
-    { key: 'policyTerms', label: 'Términos de compra', kind: 'textarea', wide: true },
-    { key: 'policyContact', label: 'Contacto', kind: 'textarea', wide: true },
-  ] },
-]
+      {lotsProduct && <div className="modal-wrap"><div className="modal-card">
+        <button className="modal-close icon-button" onClick={() => setLotsProductId(null)}><X /></button>
+        <h2>Compras de {lotsProduct.name}</h2>
+        <p>Así sabes de cuál compra sale cada venta: siempre sale primero de la compra más vieja que todavía tenga unidades (la que dice «Se vende ahora»). Cuando esa se acaba, sigue la próxima.</p>
+        {(() => {
+          const statuses = lotStatuses(lotsOfProduct, lotsProduct)
+          const tracking = tracksOptionStock(lotsProduct)
+          const general = lotsOfProduct.filter((lot) => !lot.option)
+          if (!tracking) {
+            const next = nextLotFor(lotsOfProduct, lotsProduct, '')
+            return <>
+              {next && <p className="next-lot">La próxima venta sale a costo <b>{money(next.unitCost)}</b> (compra del {shortDate(next.createdAt)}).</p>}
+              <div className="admin-table">{lotsOfProduct.map((lot) => <LotRow key={lot.id} lot={lot} status={statuses.get(lot.id) ?? 'espera'} busy={busy} onDelete={() => confirmDeletePurchase(lot)} />)}</div>
+            </>
+          }
+          return <>
+            {general.some((lot) => lot.remainingQuantity > 0) && (
+              <div className="lots-group lots-group-warn">
+                <h3>Compras sin opción asignada</h3>
+                <p className="content-hint">Son de antes de separar por opción: cualquier opción puede salir de aquí con este costo. Tócale «Repartir» y di cuántas son de cada opción, así cada una sale con su costo real.</p>
+                <div className="admin-table">{general.filter((lot) => lot.remainingQuantity > 0).map((lot) => <LotRow key={lot.id} lot={lot} status={statuses.get(lot.id) ?? 'espera'} general busy={busy} onDelete={() => confirmDeletePurchase(lot)} onSplit={() => { setError(''); setSplitDraft({ purchase: lot, parts: {} }) }} />)}</div>
+              </div>
+            )}
+            {parseOptions(lotsProduct.options).map((option) => {
+              const lots = lotsOfProduct.filter((lot) => lot.option === option)
+              const next = nextLotFor(lotsOfProduct, lotsProduct, option)
+              return <div className="lots-group" key={option}>
+                <h3>{option} <small>hay {optionStock(lotsProduct, option)} · precio {money(optionPrice(lotsProduct, option))}</small></h3>
+                {next ? <p className="next-lot">Próxima venta sale a costo <b>{money(next.unitCost)}</b>{next.option ? '' : ' (de una compra sin opción)'}.</p> : <p className="content-hint">Sin compras con unidades.</p>}
+                {lots.length > 0 && <div className="admin-table">{lots.map((lot) => <LotRow key={lot.id} lot={lot} status={statuses.get(lot.id) ?? 'espera'} busy={busy} onDelete={() => confirmDeletePurchase(lot)} />)}</div>}
+              </div>
+            })}
+          </>
+        })()}
+        {error && !splitDraft && <p className="form-error">{error}</p>}
+        <button className="primary-button full lots-restock" onClick={() => { const product = lotsProduct; setLotsProductId(null); openPurchase(product) }}><ShoppingBag size={16} />Reponer este producto</button>
+      </div></div>}
 
-function ContentEditor({ values, saved, dirty, uploading, onChange, onUpload, onDiscard, onSave, busy }: { values: Record<string, string>; saved: Record<string, string>; dirty: boolean; uploading: string | null; onChange: (value: Record<string, string>) => void; onUpload: (file: File, key: string) => void; onDiscard: () => void; onSave: () => Promise<unknown>; busy: boolean }) {
-  const set = (key: string, value: string) => onChange({ ...values, [key]: value })
-  return <section className="content-editor">
-    <div className="editor-top"><div><span>TEXTOS E IMÁGENES</span><h2>Editor de la tienda</h2><p>Cambia la voz de la marca sin tocar el código. Los cambios se publican al guardar.</p></div></div>
-    <nav className="editor-index" aria-label="Secciones del editor">{CONTENT_GROUPS.map((group, index) => <a key={group.title} href={`#grupo-${index}`}>{group.title}</a>)}</nav>
-    {CONTENT_GROUPS.map((group, index) => <div className="editor-group" id={`grupo-${index}`} key={group.title}><h3>{group.title}</h3><p className="editor-group-description">{group.description}</p><div className="editor-fields">{group.fields.map((field) => {
-      const value = values[field.key] ?? ''
-      const changed = value !== (saved[field.key] ?? '')
-      const Wrapper = field.kind === 'image' ? 'div' : 'label'
-      return <Wrapper className={`field-block ${field.wide || field.kind === 'textarea' || field.kind === 'image' ? 'wide' : ''} ${changed ? 'changed' : ''}`} key={field.key}>{field.label}{changed && <em className="changed-dot">sin guardar</em>}
-        {field.kind === 'textarea' ? <textarea rows={field.key.startsWith('policy') ? 5 : 3} value={value} onChange={(event) => set(field.key, event.target.value)}/>
-          : field.kind === 'currency' ? <select value={value || 'USD'} onChange={(event) => set(field.key, event.target.value)}>{CURRENCIES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select>
-          : field.kind === 'image' ? <div className="content-image"><div className="content-image-preview">{value ? <img src={value} alt=""/> : <ImagePlus/>}{uploading === field.key && <div className="image-loading"><LoaderCircle/>Subiendo...</div>}</div><div className="content-image-fields"><input value={value} onChange={(event) => set(field.key, event.target.value)} placeholder="https://..."/><label className="inline-upload"><ImagePlus/>Subir desde el dispositivo<input hidden type="file" accept="image/*" disabled={uploading !== null} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onUpload(file, field.key) }}/></label></div></div>
-          : <input type={field.kind === 'email' ? 'email' : field.kind === 'tel' ? 'tel' : 'text'} placeholder={field.placeholder} value={value} onChange={(event) => set(field.key, event.target.value)}/>}
-        {field.hint && <small className="field-hint">{field.hint}</small>}
-      </Wrapper>
-    })}</div></div>)}
-    <div className={`save-bar ${dirty ? 'visible' : ''}`}><p>{dirty ? 'Tienes cambios sin publicar.' : 'Todo está publicado.'}</p><div>{dirty && <button className="ghost-button" onClick={onDiscard} disabled={busy}>Descartar</button>}<button className="admin-action" disabled={busy || !dirty || uploading !== null} onClick={() => onSave()}><Save/>{busy ? 'Guardando...' : 'Guardar cambios'}</button></div></div>
-  </section>
+      {splitDraft && (() => {
+        const product = productById.get(splitDraft.purchase.productId)
+        const options = product ? parseOptions(product.options) : []
+        const assigned = Object.values(splitDraft.parts).reduce((sum, value) => sum + Math.max(0, Math.round(Number(value || 0))), 0)
+        const target = splitDraft.purchase.remainingQuantity
+        return <div className="modal-wrap modal-top"><div className="modal-card">
+          <button className="modal-close icon-button" onClick={() => setSplitDraft(null)}><X /></button>
+          <h2>Repartir compra</h2>
+          <p>Compra del {shortDate(splitDraft.purchase.createdAt)}: quedan <b>{target}</b> a <b>{money(splitDraft.purchase.unitCost)}</b> c/u. Pon cuántas de esas son de cada opción. No cambia la cantidad ni el dinero: solo dice de cuál opción es cada una.</p>
+          <form className="product-form" onSubmit={handleSplit}>
+            <div className="restock-table">
+              {options.map((option) => (
+                <div className="restock-row restock-row-2" key={option}>
+                  <div className="restock-option"><span>{option}<small>hay {product ? optionStock(product, option) : 0}</small></span></div>
+                  <input type="number" inputMode="numeric" min={0} value={splitDraft.parts[option] ?? ''} placeholder="0" onChange={(event) => setSplitDraft((current) => current && { ...current, parts: { ...current.parts, [option]: event.target.value } })} aria-label={`Cantidad de ${option}`} />
+                </div>
+              ))}
+            </div>
+            <p className={`order-edit-total ${assigned === target ? 'is-ok' : ''}`}>Repartidas <strong>{assigned}</strong> de {target}</p>
+            {error && <p className="form-error">{error}</p>}
+            <button className="primary-button full" disabled={busy || assigned !== target}>{busy ? 'Guardando…' : 'Guardar reparto'}</button>
+          </form>
+        </div></div>
+      })()}
+
+      {saleDraft && <div className="modal-wrap"><div className="modal-card">
+        <button className="modal-close icon-button" onClick={() => setSaleDraft(null)}><X /></button>
+        <h2>Registrar venta por fuera</h2>
+        <p>Para lo que vendiste en persona o por WhatsApp. Se descuenta del inventario y cuenta en Finanzas igual que un pedido de la tienda. El precio lo pones tú (puede ser un precio especial).</p>
+        <form className="product-form" onSubmit={handleSaveSale}>
+          {saleDraft.lines.map((line, index) => {
+            const product = data.products.find((item) => String(item.id) === line.productId)
+            const options = product ? parseOptions(product.options) : []
+            const tracking = product ? tracksOptionStock(product) : false
+            const available = product ? optionStock(product, line.option) : 0
+            const lineTotal = Math.round(Number(line.quantity || 0)) * cents(line.price)
+            const listPrice = product ? optionPrice(product, line.option) : 0
+            return <div className="sale-line" key={index}>
+              <div className="sale-line-head">
+                <strong>Producto {saleDraft.lines.length > 1 ? index + 1 : ''}</strong>
+                {saleDraft.lines.length > 1 && <button type="button" className="variant-remove-button" onClick={() => setSaleDraft((current) => current && { ...current, lines: current.lines.filter((_, i) => i !== index) })}>Quitar</button>}
+              </div>
+              <select required value={line.productId} onChange={(event) => {
+                const next = data.products.find((item) => String(item.id) === event.target.value)
+                const option = next ? firstSellableOption(next) : ''
+                updateSaleLine(index, { productId: event.target.value, option, price: next ? String(optionPrice(next, option) / 100) : line.price })
+              }}>
+                <option value="" disabled>Selecciona un producto</option>
+                {[...data.products].sort((a, b) => a.name.localeCompare(b.name)).map((item) => <option key={item.id} value={item.id} disabled={item.stock <= 0}>{item.name} (hay {item.stock})</option>)}
+              </select>
+              {options.length > 0 && product && (
+                <select value={line.option} onChange={(event) => updateSaleLine(index, { option: event.target.value, price: String(optionPrice(product, event.target.value) / 100) })}>
+                  {options.map((option) => {
+                    const units = optionStock(product, option)
+                    return <option key={option} value={option} disabled={tracking && units <= 0}>{option}{tracking ? ` (hay ${units})` : ''}{hasOwnPrice(product, option) ? ` · ${money(optionPrice(product, option))}` : ''}</option>
+                  })}
+                </select>
+              )}
+              <div className="form-row">
+                <label>Cantidad<input required type="number" inputMode="numeric" min={1} max={available || undefined} value={line.quantity} onChange={(event) => updateSaleLine(index, { quantity: event.target.value })} /></label>
+                <label>Precio por unidad (RD$)<input required type="number" inputMode="decimal" min={0} step="0.01" value={line.price} onChange={(event) => updateSaleLine(index, { price: event.target.value })} /></label>
+              </div>
+              {product && lineTotal > 0 && <p className="sale-line-total">{line.quantity} × {money(cents(line.price))} = <strong>{money(lineTotal)}</strong>{listPrice > 0 && cents(line.price) < listPrice && <span> · precio de tienda {money(listPrice)}</span>}</p>}
+            </div>
+          })}
+          <button type="button" className="ghost-button sale-add-line" onClick={() => setSaleDraft((current) => current && { ...current, lines: [...current.lines, emptySaleLine()] })}><Plus size={14} />Agregar otro producto</button>
+          <div className="form-row">
+            <label>Cliente (opcional)<input value={saleDraft.customerName} onChange={(event) => setSaleDraft((current) => current && { ...current, customerName: event.target.value })} placeholder="Ej. Juan Pérez" /></label>
+            <label>Teléfono (opcional)<input type="tel" value={saleDraft.phone} onChange={(event) => setSaleDraft((current) => current && { ...current, phone: event.target.value })} /></label>
+          </div>
+          <div className="form-row">
+            <label>¿Ya te pagaron?
+              <select value={saleDraft.paymentStatus} onChange={(event) => setSaleDraft((current) => current && { ...current, paymentStatus: event.target.value })}>
+                <option value="Pagado">Sí, pagado</option>
+                <option value="Pendiente">No, queda pendiente</option>
+              </select>
+            </label>
+            <label>Nota (opcional)<input value={saleDraft.notes} onChange={(event) => setSaleDraft((current) => current && { ...current, notes: event.target.value })} placeholder="Ej. venta al por mayor" /></label>
+          </div>
+          <p className="order-edit-total">Total de la venta: <strong>{money(saleDraft.lines.reduce((sum, line) => sum + Math.round(Number(line.quantity || 0)) * cents(line.price), 0))}</strong></p>
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button full" disabled={busy}>{busy ? 'Registrando…' : 'Registrar venta'}</button>
+        </form>
+      </div></div>}
+
+      {editingExpense && <div className="modal-wrap"><div className="modal-card">
+        <button className="modal-close icon-button" onClick={() => setEditingExpense(null)}><X /></button>
+        <h2>Registrar gasto</h2>
+        <form className="product-form" onSubmit={handleSaveExpense}>
+          <label>Tipo
+            <select value={editingExpense.type} onChange={(event) => setEditingExpense((current) => current && { ...current, type: event.target.value as 'negocio' | 'personal' })}>
+              <option value="negocio">Gasto del negocio (sale del dinero del negocio)</option>
+              <option value="personal">Gasto o retiro personal (sale de lo tuyo)</option>
+            </select>
+          </label>
+          <label>Descripción<input required value={editingExpense.description} onChange={(event) => setEditingExpense((current) => current && { ...current, description: event.target.value })} placeholder="Ej. transporte, comida, retiro..." /></label>
+          <label>Monto (RD$)<input required type="number" min={0} step="0.01" value={editingExpense.amount} onChange={(event) => setEditingExpense((current) => current && { ...current, amount: event.target.value })} /></label>
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button full" disabled={busy}>{busy ? 'Guardando…' : 'Registrar gasto'}</button>
+        </form>
+      </div></div>}
+    </div></div>
+  )
 }
