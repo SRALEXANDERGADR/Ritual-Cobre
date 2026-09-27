@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, AtSign, Check, Clock, HandCoins, Mail, Menu, MessageCircle, Minus, Plus, Search, ShoppingBag, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowRight, AtSign, Check, Clock, Mail, Menu, MessageCircle, Minus, Plus, Search, ShoppingBag, Trash2, X } from 'lucide-react'
 import { createOrder, type CartLine, type OrderResult } from '@/lib/store'
 import { formatMoney, whatsappLink } from '@/lib/format'
 import { BrandLogo, BrandMark } from '@/components/BrandMark'
@@ -164,8 +164,8 @@ export function Storefront({ data }: Props) {
     <a className="skip-link" href="#catalogo">Ir al catálogo</a>
     <header className="topbar">
       <button className="icon-button" onClick={() => setMenuOpen(true)} aria-label="Abrir menú"><Menu /></button>
-      <a className="wordmark" href="#inicio" aria-label={`${brand} — inicio`}><BrandLogo name={brand} /></a>
-      <nav className="desktop-nav" aria-label="Principal"><a href="#catalogo">{copy.navCatalog}</a><a href="#beneficios">{copy.navBenefits}</a><a href="#historia">Nuestra historia</a><a href="#contacto">{copy.navContact}</a></nav>
+      <a className="wordmark" href="#catalogo" aria-label={`${brand} — inicio`}><BrandLogo name={brand} /></a>
+      <nav className="desktop-nav" aria-label="Principal"><a href="#catalogo">{copy.navCatalog}</a><a href="#historia">Nuestra historia</a><a href="#contacto">{copy.navContact}</a></nav>
       <button className="cart-button" onClick={() => setCartOpen(true)} aria-label={`Abrir bolsa, ${cartCount} productos`}><ShoppingBag size={19}/><span>Bolsa</span><b>{cartCount}</b></button>
     </header>
 
@@ -174,7 +174,6 @@ export function Storefront({ data }: Props) {
       <div className="drawer-head"><BrandLogo name={brand} className="drawer-logo" /><button className="icon-button" onClick={() => setMenuOpen(false)} aria-label="Cerrar menú"><X /></button></div>
       <p className="drawer-kicker">Explora {brand}</p>
       <a href="#catalogo" onClick={() => setMenuOpen(false)}>Catálogo <ArrowRight /></a>
-      <a href="#beneficios" onClick={() => setMenuOpen(false)}>Beneficios <ArrowRight /></a>
       <a href="#historia" onClick={() => setMenuOpen(false)}>Nuestra historia <ArrowRight /></a>
       <a href="#contacto" onClick={() => setMenuOpen(false)}>Contacto <ArrowRight /></a>
       <Link to="/politicas" onClick={() => setMenuOpen(false)}>Políticas <ArrowRight /></Link>
@@ -182,32 +181,7 @@ export function Storefront({ data }: Props) {
     </aside>
 
     <main>
-      <section className="hero" id="inicio">
-        <div className="hero-copy reveal">
-          <p className="eyebrow"><Sparkles size={15}/>{copy.eyebrow}</p>
-          <h1>{copy.heroTitle}</h1>
-          <p className="hero-lede">{copy.heroDescription}</p>
-          <div className="hero-actions">
-            <a className="primary-button" href="#catalogo">{copy.heroCta}<ArrowRight /></a>
-            {whatsapp && <a className="ghost-button" href={whatsapp} target="_blank" rel="noreferrer"><MessageCircle /> Asesoría por WhatsApp</a>}
-          </div>
-        </div>
-        <div className="hero-visual reveal delay-1"><div className="image-frame"><img src={copy.heroImage || FALLBACK_IMAGE} alt={`Productos de cuidado personal ${brand}`} loading="eager" decoding="async" fetchPriority="high" /></div><div className="orbit-note">{copy.heroBadge}</div><span className="vertical-caption">RITUAL · PAUSA · PRESENCIA</span></div>
-      </section>
-
-      <section className="trust-strip" aria-label="Cómo compramos">
-        <div><MessageCircle/><p>{copy.trust1}</p></div>
-        <div><HandCoins/><p>{copy.trust2}</p></div>
-        <div><Sparkles/><p>{copy.trust3}</p></div>
-      </section>
-
-      <section className="benefits" id="beneficios">
-        <div className="section-intro"><span>01 — MANIFIESTO</span><h2>{copy.benefitsTitle}</h2></div>
-        <div className="benefit-list">{[1,2,3].map((number) => <article key={number}><span>0{number}</span><h3>{copy[`benefit${number}Title`]}</h3><p>{copy[`benefit${number}Text`]}</p></article>)}</div>
-      </section>
-
       <section className="catalog" id="catalogo">
-        <div className="catalog-heading"><div><span>02 — COLECCIÓN</span><h2>{copy.catalogTitle}</h2></div><p>{copy.catalogDescription}</p></div>
         <div className="catalog-layout">
           <aside className="filters">
             <label><Search size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar ritual..." aria-label="Buscar productos" type="search" /></label>

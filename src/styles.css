@@ -485,3 +485,6 @@ select.status-pill{border:0;border-radius:99px;padding:7px 12px;font:600 12px va
 .editor-fields .field-block{display:block;font:600 11px var(--font-mono);text-transform:uppercase;letter-spacing:.08em}
 .editor-fields .field-block.changed input,.editor-fields .field-block.changed textarea,.editor-fields .field-block.changed select{border-bottom-color:var(--clay);background:#fbf1ed}
 .editor-fields label.inline-upload{display:inline-flex;align-items:center;gap:6px;margin-top:10px;font:600 13px var(--font-body);text-transform:none;letter-spacing:0;color:var(--clay);cursor:pointer}
+
+/* Sin portada ni manifiesto: el catálogo es lo primero, sin tanto espacio arriba. */
+.catalog{padding-top:56px}@media(max-width:620px){.catalog{padding-top:28px}}
