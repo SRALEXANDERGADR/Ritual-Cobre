@@ -117,6 +117,22 @@ function buildOrderEmailHtml(order: EmailOrder): string {
  * falla el envío, solo registra un aviso en consola para no interrumpir el
  * registro del pedido del cliente. */
 export async function sendOrderNotificationEmail(env: Env, to: string, order: EmailOrder): Promise<void> {
+  // Un correo aparte para cada dirección, así nadie ve los correos de los demás.
+  await Promise.all(parseEmailList(to).map((address) => sendOne(env, address, order)))
+}
+
+/** "a@x.com, b@y.com" (también con punto y coma, espacios o saltos de línea)
+ * → lista de correos válidos, sin repetir. Máximo 10. */
+export function parseEmailList(value: string): string[] {
+  const seen = new Set<string>()
+  for (const part of String(value || '').split(/[\s,;]+/)) {
+    const email = part.trim().toLowerCase()
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) seen.add(email)
+  }
+  return [...seen].slice(0, 10)
+}
+
+async function sendOne(env: Env, to: string, order: EmailOrder): Promise<void> {
   if (!to) return
   if (!env.RESEND_API_KEY) {
     console.warn('RESEND_API_KEY no está configurado: no se envió el correo de aviso de pedido.')

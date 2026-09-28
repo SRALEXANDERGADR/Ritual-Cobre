@@ -439,3 +439,8 @@ select.status-pill{border:0;border-radius:99px;padding:7px 12px;font:600 12px va
 .quick-view,.modal-card{width:min(980px,100%);max-width:100%;min-width:0}
 .modal-card{width:min(900px,100%)}
 @media(max-width:620px){.modal-wrap{padding:12px}}
+/* Métodos de pago en el pie (se editan en el panel: Textos → Contacto y redes) */
+.footer-payments{margin-top:16px;display:flex;flex-direction:column;gap:8px}
+.footer-payments>span{font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.7}
+.payment-tags{display:flex;flex-wrap:wrap;gap:8px}
+.payment-tags b{padding:6px 12px;border:1px solid currentColor;border-radius:99px;font-size:13px;font-weight:600;opacity:.9}

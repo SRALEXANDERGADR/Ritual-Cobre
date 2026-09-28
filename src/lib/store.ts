@@ -4,7 +4,7 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'driz
 import { db } from '../../db'
 import { content, customers, expenses, imageTrash, orders, products, purchases, pushSubscriptions } from '../../db/schema'
 import { createSession, clearSession, verifyPassword, verifySession } from './auth'
-import { sendOrderNotificationEmail } from './email'
+import { sendOrderNotificationEmail, parseEmailList } from './email'
 import { SITE_URL, formatMoney as formatCurrency } from './format'
 import { deleteImage, imagePathFromUrl } from './fotos'
 import { lineName, normalizeVariants, optionPrice, optionStock, parseOptions, resolveOption, tracksOptionStock } from './variants'
@@ -51,6 +51,8 @@ const defaultContent: Record<string, string> = {
   contactEmail: '',
   instagram: '',
   schedule: 'Lunes a viernes · 9:00 a 18:00',
+  // Se muestran en el pie de la tienda (separados por coma). Vacío = no se muestran.
+  paymentMethods: 'Transferencia, Pago contra entrega',
   cartTitle: 'Tu ritual',
   checkoutTitle: 'Completa tu pedido',
   currency: 'DOP',
@@ -881,7 +883,8 @@ export const saveContent = createServerFn({ method: 'POST' }).inputValidator((da
   // ~40 viajes a Neon uno tras otro: por eso "Guardar" tardaba tanto).
   const rows = Object.entries(data || {})
     .filter(([key]) => typeof key === 'string' && key.length > 0 && key.length <= 64)
-    .map(([key, value]) => ({ key, value: String(value ?? '') }))
+    // Los correos de avisos se guardan limpios: "a@x.com, b@y.com".
+    .map(([key, value]) => ({ key, value: key === 'notificationEmail' ? parseEmailList(String(value ?? '')).join(', ') : String(value ?? '') }))
   if (rows.length) await db.insert(content).values(rows).onConflictDoUpdate({ target: content.key, set: { value: sql`excluded.value` } })
   return true
 })
@@ -1103,6 +1106,13 @@ async function sendToSubscriptions(rows: Array<{ id: number; endpoint: string; p
   if (!rows.length) return { sent: 0, failed: 0, problem: '' }
   const keys = await getVapidKeys()
   const results = await Promise.all(rows.map((row) => sendPush(row, message, keys, PUSH_SUBJECT)))
+  // Si el servicio de avisos falló un momento (sin conexión, "muy ocupado"
+  // o error de su lado), se intenta una vez más antes de rendirse.
+  const retry = rows.map((_, index) => index).filter((index) => results[index].result === 'error' && (results[index].status === 0 || results[index].status === 429 || results[index].status >= 500))
+  if (retry.length) {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await Promise.all(retry.map(async (index) => { results[index] = await sendPush(rows[index], message, keys, PUSH_SUBJECT) }))
+  }
   // Aparatos que ya no existen (app desinstalada o permiso quitado): fuera.
   const gone = rows.filter((_, index) => results[index].result === 'gone').map((row) => row.id)
   if (gone.length) await db.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, gone))

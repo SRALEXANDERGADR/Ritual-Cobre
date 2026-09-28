@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FotosSplatRouteImport } from './routes/fotos/$'
 import { Route as ApiUploadRouteImport } from './routes/api/upload'
+import { Route as ApiPushRenewRouteImport } from './routes/api/push-renew'
 
 const PoliticasRoute = PoliticasRouteImport.update({
   id: '/politicas',
@@ -40,11 +41,17 @@ const ApiUploadRoute = ApiUploadRouteImport.update({
   path: '/api/upload',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPushRenewRoute = ApiPushRenewRouteImport.update({
+  id: '/api/push-renew',
+  path: '/api/push-renew',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/politicas': typeof PoliticasRoute
+  '/api/push-renew': typeof ApiPushRenewRoute
   '/api/upload': typeof ApiUploadRoute
   '/fotos/$': typeof FotosSplatRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/politicas': typeof PoliticasRoute
+  '/api/push-renew': typeof ApiPushRenewRoute
   '/api/upload': typeof ApiUploadRoute
   '/fotos/$': typeof FotosSplatRoute
 }
@@ -60,21 +68,42 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/politicas': typeof PoliticasRoute
+  '/api/push-renew': typeof ApiPushRenewRoute
   '/api/upload': typeof ApiUploadRoute
   '/fotos/$': typeof FotosSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/politicas' | '/api/upload' | '/fotos/$'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/politicas'
+    | '/api/push-renew'
+    | '/api/upload'
+    | '/fotos/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/politicas' | '/api/upload' | '/fotos/$'
-  id: '__root__' | '/' | '/admin' | '/politicas' | '/api/upload' | '/fotos/$'
+  to:
+    | '/'
+    | '/admin'
+    | '/politicas'
+    | '/api/push-renew'
+    | '/api/upload'
+    | '/fotos/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/politicas'
+    | '/api/push-renew'
+    | '/api/upload'
+    | '/fotos/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   PoliticasRoute: typeof PoliticasRoute
+  ApiPushRenewRoute: typeof ApiPushRenewRoute
   ApiUploadRoute: typeof ApiUploadRoute
   FotosSplatRoute: typeof FotosSplatRoute
 }
@@ -116,6 +145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiUploadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/push-renew': {
+      id: '/api/push-renew'
+      path: '/api/push-renew'
+      fullPath: '/api/push-renew'
+      preLoaderRoute: typeof ApiPushRenewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -123,6 +159,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   PoliticasRoute: PoliticasRoute,
+  ApiPushRenewRoute: ApiPushRenewRoute,
   ApiUploadRoute: ApiUploadRoute,
   FotosSplatRoute: FotosSplatRoute,
 }

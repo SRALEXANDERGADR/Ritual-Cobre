@@ -41,6 +41,8 @@ export function Storefront({ data }: Props) {
   const currency = copy.currency || 'DOP'
   const money = (value: number) => formatMoney(value, currency)
   const brand = copy.brandName || 'Ritual Cobre'
+  // Métodos de pago del pie: se editan en el panel (Textos → Contacto y redes).
+  const paymentMethods = [...new Set(String(copy.paymentMethods ?? 'Transferencia, Pago contra entrega').split(/[,\n]+/).map((item) => item.trim()).filter(Boolean))].slice(0, 12)
   const whatsapp = whatsappLink(copy.whatsapp)
 
   const [menuOpen, setMenuOpen] = useState(false)
@@ -240,7 +242,7 @@ export function Storefront({ data }: Props) {
         {copy.instagram && <a className="whatsapp" href={instagramUrl(copy.instagram)} target="_blank" rel="noreferrer">Instagram <AtSign/></a>}
         {!whatsapp && !copy.contactEmail && !copy.instagram && <p>Pronto publicaremos nuestros canales de contacto.</p>}
       </div>
-      <div className="footer-col"><span>Horario</span><p className="footer-schedule"><Clock size={16}/>{copy.schedule}</p>{copy.contactEmail && <p className="footer-email"><Mail size={16}/>{copy.contactEmail}</p>}<Link to="/politicas" className="footer-link">Políticas de la tienda <ArrowRight/></Link></div>
+      <div className="footer-col"><span>Horario</span><p className="footer-schedule"><Clock size={16}/>{copy.schedule}</p>{paymentMethods.length > 0 && <div className="footer-payments"><span>Métodos de pago</span><div className="payment-tags">{paymentMethods.map((method) => <b key={method}>{method}</b>)}</div></div>}{copy.contactEmail && <p className="footer-email"><Mail size={16}/>{copy.contactEmail}</p>}<Link to="/politicas" className="footer-link">Políticas de la tienda <ArrowRight/></Link></div>
       <div className="footer-bottom"><p>© {new Date().getFullYear()} {brand}. Todos los derechos reservados.</p><a className="gadr-credit" href="https://gadrnet.com" target="_blank" rel="noopener noreferrer"><span className="gadr-credit-text">Diseño y desarrollo de la tienda: GADR Net | gadrnet.com</span><span className="gadr-mark" aria-hidden="true"><span className="gadr-mark-icon">&lt;/&gt;<i></i></span><span className="gadr-mark-word">GADR<small>Net</small></span></span></a></div>
     </footer>
 
