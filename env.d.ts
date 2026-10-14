@@ -17,6 +17,8 @@ interface Env {
   RESEND_API_KEY?: string
   // Remitente del correo, ej. "Ritual Cobre <pedidos@tudominio.com>" (opcional)
   RESEND_FROM_EMAIL?: string
+  // Plan de esta web: "demo" (la muestra en venta; el plan se escoge con ?plan=), o "basico" / "profesional" / "completo" (web ya vendida, plan fijo). Sin valor = completo. Ver src/lib/plan.ts.
+  PLAN?: string
 }
 
 // Lo mínimo que usamos de un bucket R2 (la app no carga los tipos completos de Workers).

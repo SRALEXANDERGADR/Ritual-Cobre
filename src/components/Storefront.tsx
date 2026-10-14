@@ -5,12 +5,14 @@ import { createOrder, type CartLine } from '@/lib/store'
 import { availableOptions, lineName, optionPrice, optionStock, parseOptions, priceRange, tracksOptionStock, variantFor } from '@/lib/variants'
 import type { ProductVariant } from '@/lib/variants'
 import { formatMoney, whatsappLink } from '@/lib/format'
+import { puede } from '@/lib/plan'
+import type { Plan } from '@/lib/plan'
 import { BrandLogo, BrandMark } from '@/components/BrandMark'
 
 type Product = { id: number; name: string; category: string; description: string; options: string; price: number; originalPrice: number; stock: number; image: string; variantImages: ProductVariant[] | null; optionStock: boolean; featured: boolean; isNew: boolean; bestSeller: boolean }
 type OrderResult = { orderNumber: string; total: number; items: Array<{ name: string; quantity: number; price: number }> }
 const lineKey = (line: { productId: number; option?: string }) => `${line.productId}::${line.option || ''}`
-type Props = { data: { products: Product[]; content: Record<string, string> } }
+type Props = { data: { products: Product[]; content: Record<string, string>; plan?: Plan; demo?: boolean } }
 type SortKey = 'destacados' | 'precio-asc' | 'precio-desc' | 'nombre'
 
 const CART_KEY = 'ritual-cobre-cart'
@@ -38,6 +40,8 @@ const instagramUrl = (value: string) => {
 
 export function Storefront({ data }: Props) {
   const { products, content: copy } = data
+  // Plan Básico: catálogo para mirar y «Pedir por WhatsApp» (sin bolsa ni pedidos en la web).
+  const hasCart = puede(data.plan ?? 'completo', 'carrito')
   const currency = copy.currency || 'DOP'
   const money = (value: number) => formatMoney(value, currency)
   const brand = copy.brandName || 'Ritual Cobre'
@@ -65,6 +69,7 @@ export function Storefront({ data }: Props) {
 
   // Recupera la bolsa guardada y la ajusta a precios y existencias actuales.
   useEffect(() => {
+    if (!hasCart) { setCartReady(true); return }
     const stored = readStoredCart()
     const reconciled = stored.flatMap((line) => {
       const product = products.find((item) => item.id === line.productId)
@@ -79,9 +84,9 @@ export function Storefront({ data }: Props) {
     })
     setCart(reconciled)
     setCartReady(true)
-  }, [products])
+  }, [products, hasCart])
 
-  useEffect(() => { if (cartReady) storeCart(cart) }, [cart, cartReady])
+  useEffect(() => { if (cartReady && hasCart) storeCart(cart) }, [cart, cartReady, hasCart])
 
   // Bloquea el scroll del fondo y permite cerrar con Escape.
   const anyOverlay = menuOpen || cartOpen || checkoutOpen || Boolean(viewing)
@@ -150,6 +155,12 @@ export function Storefront({ data }: Props) {
     return { ...line, quantity }
   }))
 
+  // «Pedir por WhatsApp» (plan Básico): abre el chat con el producto ya escrito.
+  // Si todavía no hay número de WhatsApp, lleva a la sección de contacto.
+  const orderLink = (product: Product, option = '') => whatsapp
+    ? whatsappLink(copy.whatsapp, `Hola ${brand}, quiero pedir: ${lineName(product.name, option)} — ${money(optionPrice(product, option))}. ¿Está disponible?`)
+    : '#contacto'
+
   function openProduct(product: Product) {
     const available = availableOptions(product)
     setViewQuantity(1)
@@ -197,7 +208,7 @@ export function Storefront({ data }: Props) {
       <button className="icon-button" onClick={() => setMenuOpen(true)} aria-label="Abrir menú"><Menu /></button>
       <a className="wordmark" href="#catalogo" aria-label={`${brand} — inicio`}><BrandLogo name={brand} /></a>
       <nav className="desktop-nav" aria-label="Principal"><a href="#catalogo">{copy.navCatalog}</a><a href="#historia">Nuestra historia</a><a href="#contacto">{copy.navContact}</a></nav>
-      <button className="cart-button" onClick={() => setCartOpen(true)} aria-label={`Abrir bolsa, ${cartCount} productos`}><ShoppingBag size={19}/><span>Bolsa</span><b>{cartCount}</b></button>
+      {hasCart && <button className="cart-button" onClick={() => setCartOpen(true)} aria-label={`Abrir bolsa, ${cartCount} productos`}><ShoppingBag size={19}/><span>Bolsa</span><b>{cartCount}</b></button>}
     </header>
 
     <div className={`overlay ${menuOpen ? 'visible' : ''}`} onClick={() => setMenuOpen(false)} />
@@ -225,7 +236,11 @@ export function Storefront({ data }: Props) {
               <div className="product-number">{String(index + 1).padStart(2, '0')}</div>
               <button className="product-image" onClick={() => openProduct(product)} aria-label={`Ver detalles de ${product.name}`}><img src={product.image || FALLBACK_IMAGE} alt={product.name} loading="lazy" decoding="async"/>{product.stock === 0 ? <span>Agotado</span> : product.featured ? <em className="product-badge">Favorito</em> : product.isNew ? <em className="product-badge">Nuevo</em> : product.bestSeller ? <em className="product-badge">Más vendido</em> : null}</button>
               <div className="product-info"><p className="product-category">{product.category}</p><h3><button onClick={() => openProduct(product)}>{product.name}</button></h3><p>{product.description}</p>{parseOptions(product.options).length > 0 && <p className="product-options-hint">{parseOptions(product.options).length} opciones</p>}<div className="stock-line"><span className={product.stock === 0 ? 'empty' : product.stock <= 3 ? 'low' : ''}>{product.stock === 0 ? 'Sin existencias' : product.stock <= 3 ? `Últimas ${product.stock} unidades` : 'Disponible'}</span>{inCart > 0 && <small className="in-cart">· {inCart} en tu bolsa</small>}</div></div>
-              <div className="product-action"><strong>{(() => { const range = priceRange(product); return range.min !== range.max ? <><small className="price-from">Desde</small> {money(range.min)}</> : money(range.min) })()}{product.originalPrice > product.price && !parseOptions(product.options).length && <s className="price-old">{money(product.originalPrice)}</s>}</strong><button disabled={product.stock === 0} onClick={() => addToCart(product)}>{product.stock ? (parseOptions(product.options).length ? 'Elegir' : 'Agregar') : 'Agotado'}<Plus /></button></div>
+              <div className="product-action"><strong>{(() => { const range = priceRange(product); return range.min !== range.max ? <><small className="price-from">Desde</small> {money(range.min)}</> : money(range.min) })()}{product.originalPrice > product.price && !parseOptions(product.options).length && <s className="price-old">{money(product.originalPrice)}</s>}</strong>{hasCart
+              ? <button disabled={product.stock === 0} onClick={() => addToCart(product)}>{product.stock ? (parseOptions(product.options).length ? 'Elegir' : 'Agregar') : 'Agotado'}<Plus /></button>
+              : product.stock === 0
+                ? <button disabled>Agotado</button>
+                : <a className="whatsapp-order" href={orderLink(product)} target={whatsapp ? '_blank' : undefined} rel="noreferrer"><MessageCircle />{whatsapp ? 'Pedir por WhatsApp' : 'Contactar'}</a>}</div>
             </article>
           })}{visibleProducts.length === 0 && <div className="empty-state"><Search/><h3>No encontramos ese ritual</h3><p>Prueba otra palabra o categoría.</p><button className="ghost-button" onClick={() => { setQuery(''); setCategory('Todos') }}>Ver todo el catálogo</button></div>}</div>
         </div>
@@ -247,13 +262,13 @@ export function Storefront({ data }: Props) {
     </footer>
 
     {whatsapp && !anyOverlay && <a className="floating-whatsapp" href={whatsapp} target="_blank" rel="noreferrer" aria-label="Escríbenos por WhatsApp"><MessageCircle /></a>}
-    {toast && <div className="toast" role="status"><span>{toast}</span>{toastCart && <button type="button" onClick={() => { setToast(''); setCartOpen(true) }}>Ver bolsa</button>}</div>}
+    {hasCart && toast && <div className="toast" role="status"><span>{toast}</span>{toastCart && <button type="button" onClick={() => { setToast(''); setCartOpen(true) }}>Ver bolsa</button>}</div>}
 
-    <div className={`overlay ${cartOpen ? 'visible' : ''}`} onClick={() => setCartOpen(false)} />
+    {hasCart && <><div className={`overlay ${cartOpen ? 'visible' : ''}`} onClick={() => setCartOpen(false)} />
     <aside className={`cart-drawer ${cartOpen ? 'open' : ''}`} aria-hidden={!cartOpen} aria-label="Bolsa de compra"><div className="drawer-head"><div><span className="drawer-kicker">BOLSA · {cartCount} {cartCount === 1 ? 'PIEZA' : 'PIEZAS'}</span><h2>{copy.cartTitle}</h2></div><button className="icon-button" onClick={() => setCartOpen(false)} aria-label="Cerrar bolsa"><X/></button></div>
       <div className="cart-lines">{cart.map((line) => { const key = lineKey(line); const max = stockFor(line); return <div className="cart-line" key={key}><img src={line.image || FALLBACK_IMAGE} alt=""/><div><h4>{line.name}</h4><p>{money(line.price)}</p><div className="quantity"><button onClick={() => setQuantity(key, line.quantity - 1)} disabled={line.quantity <= 1} aria-label="Quitar una unidad"><Minus/></button><input type="number" inputMode="numeric" min={1} max={max} value={line.quantity} onChange={(event) => setQuantity(key, Number(event.target.value))} aria-label={`Cantidad de ${line.name}`}/><button onClick={() => setQuantity(key, line.quantity + 1)} disabled={line.quantity >= max} aria-label="Agregar una unidad"><Plus/></button></div>{line.quantity >= max && <small className="cart-max">Es todo lo disponible</small>}</div><div className="cart-line-end"><strong>{money(line.price * line.quantity)}</strong><button className="remove" onClick={() => setCart((current) => current.filter((item) => lineKey(item) !== key))} aria-label={`Eliminar ${line.name}`}><Trash2/></button></div></div> })}{!cart.length && <div className="empty-cart"><ShoppingBag/><h3>Tu bolsa está esperando</h3><p>Elige algo que haga más lento tu día.</p><a className="ghost-button" href="#catalogo" onClick={() => setCartOpen(false)}>Ver el catálogo</a></div>}</div>
       <div className="cart-summary"><div><span>Subtotal</span><strong>{money(subtotal)}</strong></div><p>El envío y el método de pago se coordinan contigo después de confirmar el pedido.</p><button className="primary-button full" disabled={!cart.length} onClick={() => { setCartOpen(false); setCheckoutOpen(true) }}>Continuar con el pedido <ArrowRight/></button></div>
-    </aside>
+    </aside></>}
 
     {viewing && (() => {
       const options = parseOptions(viewing.options)
@@ -274,13 +289,14 @@ export function Storefront({ data }: Props) {
           {options.map((option) => { const out = tracked ? optionStock(viewing, option) === 0 : viewing.stock === 0; return <button key={option} type="button" role="radio" aria-checked={viewOption === option} className={`${viewOption === option ? 'active' : ''} ${out ? 'is-out' : ''}`} disabled={out} onClick={() => { setViewOption(option); setViewQuantity(1) }}>{option}</button> })}
         </div>}
         <p className={`quick-view-stock ${stock === 0 ? 'empty' : stock <= 3 ? 'low' : ''}`}>{options.length && !viewOption ? 'Elige una opción' : stock === 0 ? 'Sin existencias por ahora' : stock <= 3 ? `Últimas ${stock} unidades` : `${stock} disponibles`}</p>
-        {stock > 0 ? <div className="quick-view-buy"><div className="quantity large"><button onClick={() => setViewQuantity((value) => Math.max(1, value - 1))} disabled={viewQuantity <= 1} aria-label="Menos"><Minus/></button><span>{viewQuantity}</span><button onClick={() => setViewQuantity((value) => Math.min(stock, value + 1))} disabled={viewQuantity >= stock} aria-label="Más"><Plus/></button></div><button className="primary-button" onClick={() => addToCart(viewing, viewQuantity, viewOption)}>Agregar a la bolsa <ArrowRight/></button></div>
+        {stock > 0 && !hasCart ? <div className="quick-view-buy"><a className="primary-button" href={orderLink(viewing, viewOption)} target={whatsapp ? '_blank' : undefined} rel="noreferrer"><MessageCircle/>{whatsapp ? 'Pedir por WhatsApp' : 'Ir a contacto'}</a></div>
+          : stock > 0 ? <div className="quick-view-buy"><div className="quantity large"><button onClick={() => setViewQuantity((value) => Math.max(1, value - 1))} disabled={viewQuantity <= 1} aria-label="Menos"><Minus/></button><span>{viewQuantity}</span><button onClick={() => setViewQuantity((value) => Math.min(stock, value + 1))} disabled={viewQuantity >= stock} aria-label="Más"><Plus/></button></div><button className="primary-button" onClick={() => addToCart(viewing, viewQuantity, viewOption)}>Agregar a la bolsa <ArrowRight/></button></div>
           : whatsapp && <a className="ghost-button" href={whatsappLink(copy.whatsapp, `Hola ${brand}, ¿cuándo vuelve a estar disponible ${lineName(viewing.name, viewOption)}?`)} target="_blank" rel="noreferrer"><MessageCircle/> Avísame cuando vuelva</a>}
       </div>
     </div></div>
     })()}
 
-    {checkoutOpen && <div className="modal-wrap" onClick={(event) => { if (event.target === event.currentTarget) closeCheckout() }}><div className="modal-card" role="dialog" aria-modal="true" aria-label={copy.checkoutTitle}><button className="modal-close icon-button" onClick={closeCheckout} aria-label="Cerrar"><X/></button>{confirmation ? <div className="confirmation"><div className="success-icon"><Check/></div><span>PEDIDO RECIBIDO</span><h2>Gracias por hacer espacio.</h2><p>Tu número de pedido es</p><strong>{confirmation.orderNumber}</strong><p>Total: {money(confirmation.total)}. Te contactaremos para coordinar el pago y la entrega.</p><div className="confirmation-actions">{whatsapp && <a className="primary-button" href={whatsappLink(copy.whatsapp, confirmationMessage)} target="_blank" rel="noreferrer"><MessageCircle/> Enviar pedido por WhatsApp</a>}<button className="ghost-button" onClick={closeCheckout}>Volver a la tienda</button></div></div> : <div className="checkout-grid"><div><span className="drawer-kicker">ÚLTIMO PASO</span><h2>{copy.checkoutTitle}</h2><p>Déjanos tus datos para coordinar pago y entrega. No se realiza ningún cobro en línea.</p><form id="checkout-form" onSubmit={submitOrder} noValidate={false}>
+    {hasCart && checkoutOpen && <div className="modal-wrap" onClick={(event) => { if (event.target === event.currentTarget) closeCheckout() }}><div className="modal-card" role="dialog" aria-modal="true" aria-label={copy.checkoutTitle}><button className="modal-close icon-button" onClick={closeCheckout} aria-label="Cerrar"><X/></button>{confirmation ? <div className="confirmation"><div className="success-icon"><Check/></div><span>PEDIDO RECIBIDO</span><h2>Gracias por hacer espacio.</h2><p>Tu número de pedido es</p><strong>{confirmation.orderNumber}</strong><p>Total: {money(confirmation.total)}. Te contactaremos para coordinar el pago y la entrega.</p><div className="confirmation-actions">{whatsapp && <a className="primary-button" href={whatsappLink(copy.whatsapp, confirmationMessage)} target="_blank" rel="noreferrer"><MessageCircle/> Enviar pedido por WhatsApp</a>}<button className="ghost-button" onClick={closeCheckout}>Volver a la tienda</button></div></div> : <div className="checkout-grid"><div><span className="drawer-kicker">ÚLTIMO PASO</span><h2>{copy.checkoutTitle}</h2><p>Déjanos tus datos para coordinar pago y entrega. No se realiza ningún cobro en línea.</p><form id="checkout-form" onSubmit={submitOrder} noValidate={false}>
       <label className="field"><span>Nombre completo</span><input required name="name" autoComplete="name" minLength={2} maxLength={120} placeholder="Ej. María Pérez"/></label>
       <div className="field-row"><label className="field"><span>Teléfono / WhatsApp</span><input required name="phone" type="tel" inputMode="tel" autoComplete="tel" minLength={10} maxLength={40} placeholder="809 000 0000"/></label><label className="field"><span>Correo electrónico</span><input required name="email" type="email" autoComplete="email" maxLength={180} placeholder="tu@correo.com"/></label></div>
       <label className="field"><span>Dirección de entrega</span><textarea required name="address" autoComplete="street-address" minLength={5} maxLength={400} placeholder="Calle, número, sector y ciudad" rows={2}/></label>

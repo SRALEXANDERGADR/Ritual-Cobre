@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "web": "Ritual Cobre",
+  "moneda": "DOP",
+  "planes": [
+    {
+      "id": "basico",
+      "nombre": "Básico",
+      "mensual": 800,
+      "entrada": 1600,
+      "recomendado": false,
+      "resumen": "Para mostrar tu tienda con fotos y precios, y recibir los pedidos por WhatsApp.",
+      "incluye": [
+        "Catálogo con fotos, precios y categorías",
+        "Buscador de productos",
+        "Botón «Pedir por WhatsApp» en cada producto",
+        "Control de cuántas unidades te quedan",
+        "Panel sencillo para cambiar productos, fotos y textos",
+        "Páginas de tu historia, contacto y políticas de la tienda"
+      ],
+      "noIncluye": [
+        "Carrito de compras",
+        "Pedidos guardados en el panel",
+        "Opciones por producto (aroma, tamaño…)",
+        "Control de ganancias y gastos",
+        "App en tu teléfono con avisos"
+      ],
+      "demo": "/?plan=basico"
+    },
+    {
+      "id": "profesional",
+      "nombre": "Profesional",
+      "mensual": 1500,
+      "entrada": 3000,
+      "recomendado": true,
+      "resumen": "Para que tu tienda reciba y ordene los pedidos sola, a cualquier hora.",
+      "incluye": [
+        "Todo lo del plan Básico",
+        "Carrito de compras y envío del pedido desde la tienda",
+        "Opciones por producto (aroma, tamaño…) con su foto, precio y cantidad",
+        "Pedidos guardados en el panel, con su estado (pendiente, enviado, entregado…)",
+        "Factura en PDF para compartir con tu cliente",
+        "Descuentos en los pedidos y registro de ventas hechas en persona",
+        "Lista de tus clientes",
+        "Métodos de pago a la vista en la tienda"
+      ],
+      "noIncluye": [
+        "Compras por lotes con el costo de cada una",
+        "Finanzas: ganancias, gastos y dinero para reinvertir",
+        "App en tu teléfono que te avisa de cada pedido",
+        "Aviso por correo de cada pedido nuevo",
+        "Papelera para recuperar lo que eliminaste"
+      ],
+      "demo": "/?plan=profesional"
+    },
+    {
+      "id": "completo",
+      "nombre": "Completo",
+      "mensual": 2500,
+      "entrada": 5000,
+      "recomendado": false,
+      "resumen": "Para manejar todo el negocio: pedidos, compras y ganancias en un solo lugar.",
+      "incluye": [
+        "Todo lo del plan Profesional",
+        "Compras por lotes con el costo de cada una, para saber cuánto ganas de verdad",
+        "Finanzas: cuánto ganas, cuánto tienes para comprar y cuánto puedes retirar",
+        "App en tu teléfono que te avisa de cada pedido",
+        "Aviso por correo de cada pedido nuevo",
+        "Papelera: recupera durante 30 días lo que eliminaste"
+      ],
+      "noIncluye": [],
+      "demo": "/?plan=completo"
+    }
+  ]
+}

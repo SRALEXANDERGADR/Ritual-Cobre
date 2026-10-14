@@ -43,3 +43,41 @@ Ritual Cobre is a TanStack Start ecommerce application deployed on Cloudflare Wo
 - Uploaded images are limited to image MIME types and 8 MB, and are committed straight to the app's GitHub repo (`GITHUB_UPLOAD_PATH`, default `public/uploads`) rather than an object store — no bucket to provision.
 - Customers can be created automatically at checkout, or added/edited manually from the admin panel (unlike checkout, manual entries don't require an email).
 - The order notification email is only sent if `RESEND_API_KEY` is set AND a destination address is saved in the content editor's "Notificaciones" group (`notificationEmail`). Missing configuration never blocks order creation.
+
+## Planes (Básico · Profesional · Completo)
+
+Es el MISMO código para los tres planes; el plan lo decide la variable `PLAN` de `wrangler.jsonc` (`vars`):
+
+- `"demo"` → la web de muestra en venta (valor actual). El plan se escoge con `?plan=basico|profesional|completo` en cualquier dirección; se recuerda 30 días en la cookie `gadr_plan`. Sin `?plan` y sin cookie = completo. Abajo sale la barrita «Demo · Plan X · Cambiar plan · Ver precios» (`src/components/PlanBar.tsx`), solo en modo demo.
+- `"basico"`, `"profesional"` o `"completo"` → web ya vendida a un cliente: el plan queda fijo, la dirección no lo cambia y no sale la barrita.
+- Sin `PLAN` (o con un valor raro) → se comporta como `completo`.
+
+**Dónde se cambia qué lleva cada plan:** `src/lib/plan.ts` (`FUNCIONES`: cada función y su plan mínimo; `puede(plan, función)`). Nada de `if (plan === …)` regado por el código: todo pregunta ahí. `src/lib/plan-server.ts` decide el plan de cada visita (`planActual()`) y rechaza lo no incluido (`requierePlan()`, mensaje «Esta función no está incluida en tu plan»).
+
+| Función | Básico | Profesional | Completo |
+|---|---|---|---|
+| Catálogo, fotos, precios, categorías, buscador, textos, políticas, existencias | sí | sí | sí |
+| «Pedir por WhatsApp» en cada producto (en lugar de la bolsa) | sí | — | — |
+| Carrito y pedido desde la web (`carrito`) | — | sí | sí |
+| Opciones por producto con precio, foto y cantidad (`opciones`) | — | sí | sí |
+| Pedidos en el panel, estados, factura PDF, descuentos, venta por fuera (`pedidos`) | — | sí | sí |
+| Clientes (`clientes`) y métodos de pago en la tienda (`metodosPago`) | — | sí | sí |
+| Compras por lotes «Reponer» (`lotes`) | — | — | sí |
+| Finanzas y gastos (`finanzas`) | — | — | sí |
+| App «RC Admin» con avisos al teléfono (`app`) | — | — | sí |
+| Aviso por correo de cada pedido (`avisosCorreo`) | — | — | sí |
+| Papelera de 30 días (`papelera`) | — | — | sí |
+
+Cómo se aplica:
+
+- **Tienda pública:** lo que el plan no incluye no sale (sin botones muertos). En Básico, en vez de «Agregar» sale «Pedir por WhatsApp»; sin bolsa ni pedido. `getStorefront` también quita las opciones y los métodos de pago de lo que manda a la tienda.
+- **Panel, web de un cliente:** las pestañas y botones del plan que no se tiene no salen. **Panel, modo demo:** salen con candado y «Disponible en el plan …».
+- **Servidor:** cada función de `store.ts` llama a `requierePlan()`. `getAdminData` solo lee y manda lo que el plan incluye. `saveContent` ignora los textos de funciones no incluidas (no los borra).
+- **Cambiar de plan NUNCA borra datos.** Al bajar, lo que sobra se esconde (los pedidos, compras, gastos, opciones y papelera siguen guardados); al subir, vuelve a salir. `saveProduct` conserva las opciones de un producto aunque el plan no las muestre.
+- **Existencias sin lotes (Básico y Profesional):** la cantidad se escribe directo en el producto (nuevo o existente) y, en Profesional, al vender sigue bajando sola. Solo con lotes (Completo) un producto nuevo empieza en 0 y se llena con «Reponer». Si luego se sube a Completo, esas unidades salen como «Sin costo registrado» hasta registrar sus compras.
+- **Lo que esta web NO tiene** (así que no está en ningún plan): «Mis pedidos» para el cliente, compartir artículo, socios y garantía.
+
+**`public/gadr-planes.json`** lo lee gadrnet.com (formato fijo; precios en pesos enteros; `demo` es relativo a la web). `public/_headers` le pone CORS abierto para poder leerlo desde otro sitio. Si cambia el reparto de arriba, actualiza también ese archivo.
+
+**Probar:** abrir `/?plan=basico`, `/?plan=profesional` y `/?plan=completo` (y `/admin` en cada uno) en tamaño de teléfono. En Completo todo debe funcionar igual que antes.
+

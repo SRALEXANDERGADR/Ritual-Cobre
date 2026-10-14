@@ -8,11 +8,18 @@ export const Route = createFileRoute('/api/push-renew')({
   server: {
     handlers: {
       GET: async () => {
+        // Las notificaciones son del plan Completo.
+        const { planActual } = await import('@/lib/plan-server')
+        const { puede } = await import('@/lib/plan')
+        if (!puede(planActual().plan, 'app')) return Response.json({ publicKey: '' }, { status: 404 })
         const { getPushPublicKey } = await import('@/lib/push-renew')
         return Response.json({ publicKey: await getPushPublicKey() }, { headers: { 'Cache-Control': 'no-store' } })
       },
       POST: async ({ request }) => {
         // Se carga aquí adentro para que el código del servidor no llegue al navegador.
+        const { planActual } = await import('@/lib/plan-server')
+        const { puede } = await import('@/lib/plan')
+        if (!puede(planActual().plan, 'app')) return Response.json({ ok: false }, { status: 404 })
         const { renewPushSubscription } = await import('@/lib/push-renew')
         const body = (await request.json().catch(() => null)) as Record<string, string> | null
         if (!body) return Response.json({ ok: false }, { status: 400 })

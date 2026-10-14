@@ -1,0 +1,27 @@
+/* Barrita de la demo (solo sale cuando PLAN = "demo"). Abajo a la izquierda y
+   con ancho limitado para no tapar el botón flotante de WhatsApp. */
+.plan-bar{position:fixed;left:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:40;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;max-width:calc(100vw - 92px);padding:7px 12px;border-radius:999px;background:rgba(24,36,49,.88);color:#fff;font:600 12px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.22);backdrop-filter:blur(8px)}
+.plan-bar-text{opacity:.92;white-space:nowrap}
+.plan-bar-link{appearance:none;border:0;background:none;padding:0;margin:0;color:#ffd9b8;font:inherit;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.plan-bar-link:hover{color:#fff}
+.plan-bar-menu{position:absolute;left:0;bottom:calc(100% + 8px);display:flex;flex-direction:column;min-width:150px;padding:6px;border-radius:14px;background:rgba(24,36,49,.97);box-shadow:0 10px 28px rgba(0,0,0,.3)}
+.plan-bar-menu button{appearance:none;border:0;background:none;color:#fff;text-align:left;font:inherit;font-weight:600;padding:10px 12px;border-radius:9px;cursor:pointer}
+.plan-bar-menu button:hover,.plan-bar-menu button.active{background:rgba(255,255,255,.14)}
+@media print{.plan-bar{display:none}}
+
+/* Plan Básico: «Pedir por WhatsApp» en cada producto (en lugar de la bolsa). */
+.product-action a.whatsapp-order{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid;font-weight:700;color:inherit;text-decoration:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.product-action a.whatsapp-order:hover{color:var(--clay)}
+.product-action a.whatsapp-order:active{transform:scale(.96);opacity:.8}
+.product-action a.whatsapp-order svg{width:17px;height:17px;flex-shrink:0}
+
+/* Panel: candados de lo que el plan no incluye (en la demo se ven; en la web de un cliente no salen). */
+.rc-admin .is-locked{opacity:.6}
+.rc-admin .admin-sidebar nav button.is-locked svg:last-child{margin-left:2px;opacity:.85}
+.rc-admin .prod-row-actions button.is-locked,.rc-admin .quick-actions button.is-locked{border-style:dashed;cursor:pointer}
+.rc-admin .quick-actions button .lock-tag{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:600;opacity:.9}
+.rc-admin .plan-lock{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:32px 20px;margin-top:14px;border:1px dashed currentColor;border-radius:14px;opacity:.9}
+.rc-admin .plan-lock p{margin:0;max-width:420px;opacity:.85}
+.rc-admin .plan-lock-inline{flex-direction:row;text-align:left;align-items:center;gap:12px;padding:12px 14px;margin:10px 0}
+.rc-admin .plan-lock-inline strong{display:block}
+.rc-admin .plan-lock-inline span,.rc-admin .plan-lock-inline div span{display:block;font-size:13px;opacity:.85}

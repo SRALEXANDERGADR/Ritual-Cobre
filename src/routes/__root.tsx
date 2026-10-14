@@ -1,15 +1,28 @@
-import { HeadContent, Link, Scripts, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Link, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
+import { PlanBar } from '@/components/PlanBar'
 import { SITE_URL } from '@/lib/format'
+import { getPlanInfo } from '@/lib/store'
 
 import '../styles.css'
+import '../plan-bar.css'
 
 const TITLE = 'Ritual Cobre — cuidado personal sensorial'
 const DESCRIPTION = 'Fórmulas sensoriales para convertir lo cotidiano en un pequeño ritual de presencia. Aceites, bálsamos, brumas y jabones hechos en pequeños lotes.'
 const IMAGE = `${SITE_URL}/assets/portada.png`
 
+// En la demo, cualquier dirección acepta ?plan=basico|profesional|completo.
+// Este mini-script lo guarda en la cookie «gadr_plan» (30 días) ANTES de que
+// cargue la página, para que todo lo que se pida después ya vaya con ese plan.
+// En la web de un cliente (plan fijo) la cookie no se usa para nada.
+const PLAN_SCRIPT = "(function(){try{var m=location.search.match(/[?&]plan=(basico|profesional|completo)(?:&|$)/);if(m){document.cookie='gadr_plan='+m[1]+';max-age=2592000;path=/;samesite=lax'}}catch(e){}})()"
+
 export const Route = createRootRoute({
+  // Plan de la visita: lo usa la barrita de la demo. Se pide una sola vez por
+  // sesión; para cambiar de plan en la demo se recarga la página.
+  loader: () => getPlanInfo(),
+  staleTime: Infinity,
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
@@ -43,13 +56,25 @@ export const Route = createRootRoute({
     ],
   }),
   shellComponent: RootDocument,
+  component: RootComponent,
   notFoundComponent: NotFound,
 })
+
+function RootComponent() {
+  const { plan, demo } = Route.useLoaderData()
+  return (
+    <>
+      <Outlet />
+      <PlanBar plan={plan} demo={demo} />
+    </>
+  )
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: PLAN_SCRIPT }} />
         <HeadContent />
       </head>
       <body>

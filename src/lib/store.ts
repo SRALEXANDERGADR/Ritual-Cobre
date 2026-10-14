@@ -11,6 +11,16 @@ import { lineName, normalizeVariants, optionPrice, optionStock, parseOptions, re
 import type { ProductVariant } from './variants'
 import { generateVapidKeys, sendPush } from './push'
 import type { PushMessage, VapidKeys } from './push'
+import { MENSAJE_NO_INCLUIDO, puede } from './plan'
+import type { Funcion } from './plan'
+import { planActual, recordarPlanDemo, requierePlan } from './plan-server'
+
+/** Consulta que solo se ejecuta si el plan incluye esa parte del panel. Un
+ * constructor de consultas de Drizzle no hace nada hasta que se espera su
+ * resultado, así que si no se incluye, ni se toca la base de datos. */
+function soloSi<T>(incluido: boolean, consulta: PromiseLike<T[]>): PromiseLike<T[]> {
+  return incluido ? consulta : Promise.resolve([] as T[])
+}
 
 // Días que un elemento permanece en papelera (productos, clientes, pedidos
 // e imágenes) antes de eliminarse definitivamente.
@@ -477,10 +487,19 @@ export const checkSession = createServerFn({ method: 'GET' }).handler(async () =
   return verifySession()
 })
 
+// Plan de esta visita (para la barrita de la demo). En la web de un cliente
+// el plan es fijo y `demo` es false.
+export const getPlanInfo = createServerFn({ method: 'GET' }).handler(async () => {
+  recordarPlanDemo()
+  return planActual()
+})
+
 // ───────────────────────────────────────────────────────────────────────
 // TIENDA PÚBLICA
 // ───────────────────────────────────────────────────────────────────────
 export const getStorefront = createServerFn({ method: 'GET' }).handler(async () => {
+  recordarPlanDemo()
+  const { plan, demo } = planActual()
   await ensureSchema()
   await ensureSeededThrottled()
   const [productRows, contentRows] = await Promise.all([
@@ -490,9 +509,15 @@ export const getStorefront = createServerFn({ method: 'GET' }).handler(async () 
   // El costo (lo que se pagó por cada producto) es solo para el panel: no
   // se manda a la tienda pública, donde cualquiera podría verlo en el
   // código de la página.
-  const publicProducts = productRows.map(({ cost: _cost, ...product }) => product)
+  // Sin «opciones» en el plan, la tienda muestra cada producto como uno solo
+  // (con su precio general). Las opciones siguen guardadas: si el plan sube,
+  // vuelven a salir.
+  const conOpciones = puede(plan, 'opciones')
+  const publicProducts = productRows.map(({ cost: _cost, ...product }) => (conOpciones ? product : { ...product, options: '', variantImages: [] as ProductVariant[], optionStock: false }))
   const publicContent = Object.fromEntries(contentRows.filter((item) => !PRIVATE_CONTENT_KEYS.has(item.key)).map((item) => [item.key, item.value]))
-  return { products: publicProducts, content: publicContent }
+  // Los métodos de pago solo se muestran en los planes que cobran en la web.
+  if (!puede(plan, 'metodosPago')) publicContent.paymentMethods = ''
+  return { products: publicProducts, content: publicContent, plan, demo }
 })
 
 // Configuración privada guardada en la tabla `content` que la tienda no
@@ -502,6 +527,7 @@ const PRIVATE_CONTENT_KEYS = new Set(['capitalInicial', 'reinvestPercent', 'noti
 export const createOrder = createServerFn({ method: 'POST' })
   .inputValidator((data: { name: string; phone: string; email: string; address: string; website?: string; items: CartLine[] }) => data)
   .handler(async ({ data }) => {
+    const plan = requierePlan('carrito')
     // Campo trampa: si viene lleno, lo mandó un robot. Se responde como si
     // todo hubiera salido bien, pero no se guarda nada ni se toca el stock.
     if (data.website) return { orderNumber: makeFolio('PED'), total: 0, orderId: 0 }
@@ -546,7 +572,7 @@ export const createOrder = createServerFn({ method: 'POST' })
 
     const [order] = await db.insert(orders).values({ orderNumber, customerId: customer.id, customerName: data.name, email: data.email, phone: data.phone, address: data.address, items: calculated, total, createdAt }).returning()
 
-    const [notificationRow] = await db.select().from(content).where(eq(content.key, 'notificationEmail')).limit(1)
+    const [notificationRow] = puede(plan, 'avisosCorreo') ? await db.select().from(content).where(eq(content.key, 'notificationEmail')).limit(1) : []
     if (notificationRow?.value) {
       const settings = Object.fromEntries((await db.select().from(content).where(inArray(content.key, ['currency', 'brandName']))).map((row) => [row.key, row.value]))
       await sendOrderNotificationEmail(env, notificationRow.value, { orderNumber, createdAt, customerName: data.name, email: data.email, phone: data.phone, address: data.address, total, currency: settings.currency || 'DOP', brandName: settings.brandName || 'Ritual Cobre', items: calculated })
@@ -555,6 +581,7 @@ export const createOrder = createServerFn({ method: 'POST' })
     // Aviso al teléfono (app del panel admin). Si algo falla aquí, el
     // pedido ya quedó guardado igual: nunca se le muestra error al cliente.
     try {
+      if (!puede(plan, 'app')) throw new Error('sin app')
       const units = calculated.reduce((sum, item) => sum + item.quantity, 0)
       const names = calculated.map((item) => `${item.quantity}× ${item.name}`).join(', ')
       await notifyAdmins({
@@ -573,21 +600,31 @@ export const createOrder = createServerFn({ method: 'POST' })
 // ───────────────────────────────────────────────────────────────────────
 export const getAdminData = createServerFn({ method: 'GET' }).handler(async () => {
   await requireAdmin()
+  const { plan, demo } = planActual()
   await ensureSeededThrottled()
   await cleanupThrottled()
+  // Solo se leen (y se mandan al panel) las partes que el plan incluye. Lo
+  // demás sigue guardado en la base de datos, intacto.
+  const conPedidos = puede(plan, 'pedidos')
+  const conClientes = puede(plan, 'clientes')
+  const conLotes = puede(plan, 'lotes')
+  const conFinanzas = puede(plan, 'finanzas')
+  const conPapelera = puede(plan, 'papelera')
   const [productRows, orderRows, customerRows, contentRows, purchaseRows, expenseRows, trashedProducts, trashedOrders, trashedCustomers, trashedImages] = await Promise.all([
     db.select().from(products).where(isNull(products.deletedAt)).orderBy(desc(products.createdAt)),
-    db.select().from(orders).where(isNull(orders.deletedAt)).orderBy(desc(orders.createdAt)),
-    db.select().from(customers).where(isNull(customers.deletedAt)).orderBy(desc(customers.createdAt)),
+    soloSi(conPedidos, db.select().from(orders).where(isNull(orders.deletedAt)).orderBy(desc(orders.createdAt))),
+    soloSi(conClientes, db.select().from(customers).where(isNull(customers.deletedAt)).orderBy(desc(customers.createdAt))),
     db.select().from(content),
-    db.select().from(purchases).orderBy(desc(purchases.createdAt)),
-    db.select().from(expenses).orderBy(desc(expenses.createdAt)),
-    db.select().from(products).where(isNotNull(products.deletedAt)).orderBy(desc(products.deletedAt)),
-    db.select().from(orders).where(isNotNull(orders.deletedAt)).orderBy(desc(orders.deletedAt)),
-    db.select().from(customers).where(isNotNull(customers.deletedAt)).orderBy(desc(customers.deletedAt)),
-    db.select().from(imageTrash).orderBy(desc(imageTrash.deletedAt)),
+    soloSi(conLotes, db.select().from(purchases).orderBy(desc(purchases.createdAt))),
+    soloSi(conFinanzas, db.select().from(expenses).orderBy(desc(expenses.createdAt))),
+    soloSi(conPapelera, db.select().from(products).where(isNotNull(products.deletedAt)).orderBy(desc(products.deletedAt))),
+    soloSi(conPapelera, db.select().from(orders).where(isNotNull(orders.deletedAt)).orderBy(desc(orders.deletedAt))),
+    soloSi(conPapelera, db.select().from(customers).where(isNotNull(customers.deletedAt)).orderBy(desc(customers.deletedAt))),
+    soloSi(conPapelera, db.select().from(imageTrash).orderBy(desc(imageTrash.deletedAt))),
   ])
   return {
+    plan,
+    demo,
     products: productRows,
     orders: orderRows,
     customers: customerRows,
@@ -605,39 +642,53 @@ export const saveProduct = createServerFn({ method: 'POST' })
   .inputValidator((data: { id?: number; name: string; category: string; description: string; options: string; price: number; originalPrice: number; stock: number; image: string; variantImages: ProductVariant[]; optionStock?: boolean; renames?: Array<{ from: string; to: string }>; featured: boolean; isNew: boolean; bestSeller: boolean; active: boolean }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    const { plan } = planActual()
+    const conOpciones = puede(plan, 'opciones')
+    const conLotes = puede(plan, 'lotes')
     const name = data.name.trim()
     if (!name) throw new Error('El nombre del producto es obligatorio.')
-    const optionNames = parseOptions(data.options)
-    const typedNames = String(data.options || '').split(',').map((item) => item.trim()).filter(Boolean)
-    if (typedNames.length !== optionNames.length) throw new Error('Hay dos opciones con el mismo nombre. Cámbiale el nombre a una de ellas.')
     const isNew = !data.id
-    const trackOptions = Boolean(data.optionStock) && optionNames.length > 0
+    const [previous] = data.id ? await db.select().from(products).where(eq(products.id, data.id)).limit(1) : []
+    // Sin «opciones» en el plan, las opciones que el producto ya tenga se
+    // conservan tal cual (el panel no las muestra, pero no se pierden).
+    const optionNames = conOpciones ? parseOptions(data.options) : parseOptions(previous?.options)
+    if (conOpciones) {
+      const typedNames = String(data.options || '').split(',').map((item) => item.trim()).filter(Boolean)
+      if (typedNames.length !== optionNames.length) throw new Error('Hay dos opciones con el mismo nombre. Cámbiale el nombre a una de ellas.')
+    }
+    const trackOptions = (conOpciones ? Boolean(data.optionStock) : Boolean(previous?.optionStock)) && optionNames.length > 0
+    // Con compras por lotes (plan Completo), un producto nuevo empieza en 0:
+    // las unidades se suman con «Reponer», así queda registrado lo que costaron.
+    // Sin lotes, la cantidad se escribe directo en el producto.
+    const startsEmpty = isNew && conLotes
     // Una entrada por cada opción vigente (foto, descripción, precio propio y
-    // cantidad). Lo de opciones que ya se borraron no se guarda. Un producto
-    // nuevo siempre empieza en 0: las unidades se suman con «Reponer», así
-    // queda registrado lo que costaron.
-    const variantImages: ProductVariant[] = optionNames.map((option) => {
-      const entry = (data.variantImages || []).find((item) => item.option === option)
-      return {
-        option,
-        image: String(entry?.image || ''),
-        description: String(entry?.description || '').trim(),
-        price: Math.max(0, Math.round(Number(entry?.price || 0))),
-        stock: isNew ? 0 : Math.max(0, Math.round(Number(entry?.stock || 0))),
-      }
-    })
-    const stock = isNew ? 0 : trackOptions ? variantImages.reduce((sum, entry) => sum + (entry.stock ?? 0), 0) : Math.max(0, Math.round(Number(data.stock) || 0))
+    // cantidad). Lo de opciones que ya se borraron no se guarda.
+    const variantImages: ProductVariant[] = conOpciones
+      ? optionNames.map((option) => {
+        const entry = (data.variantImages || []).find((item) => item.option === option)
+        return {
+          option,
+          image: String(entry?.image || ''),
+          description: String(entry?.description || '').trim(),
+          price: Math.max(0, Math.round(Number(entry?.price || 0))),
+          stock: startsEmpty ? 0 : Math.max(0, Math.round(Number(entry?.stock || 0))),
+        }
+      })
+      : (previous?.variantImages ?? [])
+    const typedStock = Math.max(0, Math.round(Number(data.stock) || 0))
+    const stock = startsEmpty ? 0
+      : trackOptions ? variantImages.reduce((sum, entry) => sum + (entry.stock ?? 0), 0)
+      : typedStock
     const values = { name, category: data.category || 'Otros', description: data.description.trim(), options: optionNames.join(', '), price: Math.max(0, Math.round(data.price)), originalPrice: Math.max(0, Math.round(data.originalPrice)), stock, image: data.image, variantImages, optionStock: trackOptions, featured: data.featured, isNew: data.isNew, bestSeller: data.bestSeller, active: data.active }
     if (data.id) {
       // Si se le cambió el nombre a una opción, sus lotes de compra la siguen.
-      for (const rename of data.renames || []) {
+      for (const rename of conOpciones ? data.renames || [] : []) {
         const from = String(rename.from || '').trim()
         const to = String(rename.to || '').trim()
         if (from && to && from !== to && optionNames.includes(to) && !optionNames.includes(from)) {
           await db.update(purchases).set({ option: to }).where(and(eq(purchases.productId, data.id), eq(purchases.option, from)))
         }
       }
-      const [previous] = await db.select({ image: products.image, variantImages: products.variantImages }).from(products).where(eq(products.id, data.id)).limit(1)
       if (previous && previous.image && previous.image !== data.image) await trashImage(previous.image, 'Imagen reemplazada')
       const keptUrls = new Set(variantImages.map((entry) => entry.image).filter(Boolean))
       for (const old of previous?.variantImages || []) {
@@ -658,12 +709,14 @@ export const deleteProduct = createServerFn({ method: 'POST' }).inputValidator((
 
 export const restoreProduct = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('papelera')
   await db.update(products).set({ deletedAt: null }).where(eq(products.id, data))
   return true
 })
 
 export const purgeProduct = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('papelera')
   const [product] = await db.select({ image: products.image, variantImages: products.variantImages }).from(products).where(eq(products.id, data)).limit(1)
   await db.delete(products).where(eq(products.id, data))
   if (product?.image) await trashImage(product.image, 'Producto eliminado definitivamente desde la papelera')
@@ -680,6 +733,7 @@ export const updateOrderStatus = createServerFn({ method: 'POST' })
   .inputValidator((data: { id: number; status: string; paymentStatus: string; notes?: string }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    requierePlan('pedidos')
     if (!ORDER_STATUSES.includes(data.status) || !PAYMENT_STATUSES.includes(data.paymentStatus)) throw new Error('Estado inválido.')
     const [order] = await db.select().from(orders).where(eq(orders.id, data.id)).limit(1)
     if (!order) throw new Error('Ese pedido ya no existe.')
@@ -716,6 +770,7 @@ export const updateOrder = createServerFn({ method: 'POST' })
   .inputValidator((data: { id: number; customerName: string; email: string; phone: string; address: string; notes: string; items: OrderItem[]; discount?: number }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    requierePlan('pedidos')
     const customerName = data.customerName.trim()
     if (!customerName) throw new Error('El nombre del cliente es obligatorio.')
     if (!data.items.length) throw new Error('El pedido debe tener al menos un producto.')
@@ -810,18 +865,21 @@ export const updateOrder = createServerFn({ method: 'POST' })
 
 export const deleteOrder = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('pedidos')
   await db.update(orders).set({ deletedAt: new Date() }).where(eq(orders.id, data))
   return true
 })
 
 export const restoreOrder = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('papelera')
   await db.update(orders).set({ deletedAt: null }).where(eq(orders.id, data))
   return true
 })
 
 export const purgeOrder = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('papelera')
   await db.delete(orders).where(eq(orders.id, data))
   return true
 })
@@ -835,6 +893,7 @@ export const recordManualSale = createServerFn({ method: 'POST' })
   .inputValidator((data: { customerName: string; phone: string; notes: string; paymentStatus: string; items: Array<{ productId: number; option: string; quantity: number; price: number }> }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    const plan = requierePlan('pedidos')
     if (!Array.isArray(data.items) || !data.items.length) throw new Error('Agrega al menos un producto.')
     const lines = data.items.map((item) => ({ productId: Number(item.productId), option: String(item.option || '').trim(), quantity: Math.round(Number(item.quantity)), price: Math.max(0, Math.round(Number(item.price))) }))
     for (const line of lines) {
@@ -852,7 +911,7 @@ export const recordManualSale = createServerFn({ method: 'POST' })
     try {
       checkAvailability(lines, rows)
     } catch (caught) {
-      throw new Error(`${caught instanceof Error ? caught.message : 'No hay suficientes unidades.'} Si tienes más, regístralas primero con «Reponer».`)
+      throw new Error(`${caught instanceof Error ? caught.message : 'No hay suficientes unidades.'} ${puede(plan, 'lotes') ? 'Si tienes más, regístralas primero con «Reponer».' : 'Si tienes más, corrige la cantidad en «Editar» del producto.'}`)
     }
     const items: OrderItem[] = []
     for (const line of lines) {
@@ -877,12 +936,27 @@ export const recordManualSale = createServerFn({ method: 'POST' })
 // ───────────────────────────────────────────────────────────────────────
 // ADMIN — contenido del sitio
 // ───────────────────────────────────────────────────────────────────────
+// Textos de configuración que pertenecen a una función con plan mínimo. Si el
+// plan no la incluye, ese texto no se toca (se queda guardado como está).
+const CONTENT_KEY_FEATURE: Record<string, Funcion> = {
+  capitalInicial: 'finanzas',
+  reinvestPercent: 'finanzas',
+  notificationEmail: 'avisosCorreo',
+  paymentMethods: 'metodosPago',
+  cartTitle: 'carrito',
+  checkoutTitle: 'carrito',
+}
+
 export const saveContent = createServerFn({ method: 'POST' }).inputValidator((data: Record<string, string>) => data).handler(async ({ data }) => {
   await requireAdmin()
+  const { plan } = planActual()
+  const allowed = (key: string) => !CONTENT_KEY_FEATURE[key] || puede(plan, CONTENT_KEY_FEATURE[key])
+  const sent = Object.keys(data || {}).filter((key) => key.length > 0 && key.length <= 64)
+  if (sent.length > 0 && !sent.some(allowed)) throw new Error(MENSAJE_NO_INCLUIDO)
   // Todo en UNA sola consulta (antes era una consulta por cada campo,
   // ~40 viajes a Neon uno tras otro: por eso "Guardar" tardaba tanto).
   const rows = Object.entries(data || {})
-    .filter(([key]) => typeof key === 'string' && key.length > 0 && key.length <= 64)
+    .filter(([key]) => typeof key === 'string' && key.length > 0 && key.length <= 64 && allowed(key))
     // Los correos de avisos se guardan limpios: "a@x.com, b@y.com".
     .map(([key, value]) => ({ key, value: key === 'notificationEmail' ? parseEmailList(String(value ?? '')).join(', ') : String(value ?? '') }))
   if (rows.length) await db.insert(content).values(rows).onConflictDoUpdate({ target: content.key, set: { value: sql`excluded.value` } })
@@ -896,6 +970,7 @@ export const saveCustomer = createServerFn({ method: 'POST' })
   .inputValidator((data: { id?: number; name: string; email: string; phone: string; address: string; notes: string }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    requierePlan('clientes')
     const name = data.name.trim()
     if (!name) throw new Error('El nombre es obligatorio.')
     const values = { name, email: data.email.trim(), phone: data.phone.trim(), address: data.address.trim(), notes: data.notes.trim() }
@@ -909,18 +984,21 @@ export const saveCustomer = createServerFn({ method: 'POST' })
 
 export const deleteCustomer = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('clientes')
   await db.update(customers).set({ deletedAt: new Date() }).where(eq(customers.id, data))
   return true
 })
 
 export const restoreCustomer = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('papelera')
   await db.update(customers).set({ deletedAt: null }).where(eq(customers.id, data))
   return true
 })
 
 export const purgeCustomer = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('papelera')
   await db.delete(customers).where(eq(customers.id, data))
   return true
 })
@@ -937,6 +1015,7 @@ export const recordPurchase = createServerFn({ method: 'POST' })
   .inputValidator((data: { productId: number; notes: string; fund?: Fund; lines: Array<{ option: string; quantity: number; unitCost: number }> }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    requierePlan('lotes')
     const fund: Fund = FUNDS.includes(data.fund as Fund) ? (data.fund as Fund) : 'capital'
     const product = await loadProduct(Number(data.productId))
     if (!product) throw new Error('Ese producto ya no existe.')
@@ -984,6 +1063,7 @@ export const recordPurchase = createServerFn({ method: 'POST' })
 // que se pagó (Dinero del negocio o Dinero para reinvertir).
 export const deletePurchase = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('lotes')
   const [purchase] = await db.select().from(purchases).where(eq(purchases.id, data)).limit(1)
   if (!purchase) throw new Error('Esa compra ya no existe.')
   if (purchase.remainingQuantity <= 0) throw new Error('Ese lote ya se vendió completo: no queda nada que quitar.')
@@ -1023,6 +1103,7 @@ export const splitPurchase = createServerFn({ method: 'POST' })
   .inputValidator((data: { id: number; parts: Array<{ option: string; quantity: number }> }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    requierePlan('lotes')
     const [purchase] = await db.select().from(purchases).where(eq(purchases.id, Number(data.id))).limit(1)
     if (!purchase) throw new Error('Esa compra ya no existe.')
     if (purchase.option) throw new Error('Este lote ya pertenece a una opción.')
@@ -1063,6 +1144,7 @@ export const recordExpense = createServerFn({ method: 'POST' })
   .inputValidator((data: { type: 'negocio' | 'personal'; description: string; amount: number }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    requierePlan('finanzas')
     const description = data.description.trim()
     const amount = Math.max(0, Math.round(data.amount))
     if (!description) throw new Error('Escribe una descripción del gasto.')
@@ -1073,6 +1155,7 @@ export const recordExpense = createServerFn({ method: 'POST' })
 
 export const deleteExpense = createServerFn({ method: 'POST' }).inputValidator((id: number) => id).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('finanzas')
   await db.delete(expenses).where(eq(expenses.id, data))
   return true
 })
@@ -1133,6 +1216,7 @@ async function notifyAdmins(message: PushMessage) {
 /** Lo que la app necesita para activar las notificaciones en un aparato. */
 export const getPushSetup = createServerFn({ method: 'GET' }).handler(async () => {
   await requireAdmin()
+  requierePlan('app')
   const keys = await getVapidKeys()
   const rows = await db.select({ id: pushSubscriptions.id, endpoint: pushSubscriptions.endpoint, label: pushSubscriptions.label, createdAt: pushSubscriptions.createdAt }).from(pushSubscriptions).orderBy(desc(pushSubscriptions.createdAt))
   return { publicKey: keys.publicKey, devices: rows.map((row) => ({ id: row.id, endpoint: row.endpoint, label: row.label, createdAt: row.createdAt })) }
@@ -1142,6 +1226,7 @@ export const savePushSubscription = createServerFn({ method: 'POST' })
   .inputValidator((data: { endpoint: string; p256dh: string; auth: string; label: string }) => data)
   .handler(async ({ data }) => {
     await requireAdmin()
+    requierePlan('app')
     const endpoint = String(data.endpoint || '')
     if (!/^https:\/\//.test(endpoint) || endpoint.length > 1000) throw new Error('La suscripción del navegador no es válida.')
     if (!data.p256dh || !data.auth) throw new Error('Faltan las claves de la suscripción.')
@@ -1152,6 +1237,7 @@ export const savePushSubscription = createServerFn({ method: 'POST' })
 
 export const removePushSubscription = createServerFn({ method: 'POST' }).inputValidator((endpoint: string) => endpoint).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('app')
   await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, String(data || '')))
   return true
 })
@@ -1159,6 +1245,7 @@ export const removePushSubscription = createServerFn({ method: 'POST' }).inputVa
 /** Manda un aviso de prueba (a este aparato o, sin endpoint, a todos). */
 export const sendTestPush = createServerFn({ method: 'POST' }).inputValidator((endpoint: string) => endpoint).handler(async ({ data }) => {
   await requireAdmin()
+  requierePlan('app')
   const rows = data
     ? await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, String(data)))
     : await db.select().from(pushSubscriptions)

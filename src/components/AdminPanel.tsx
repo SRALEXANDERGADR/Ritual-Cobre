@@ -3,7 +3,7 @@ import type { ChangeEvent, ComponentType, FormEvent, ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import {
   AlertTriangle, Bell, BellOff, Check, ChevronLeft, Download, Layers, Smartphone, LayoutDashboard, ListOrdered, LogOut, Package,
-  Pencil, Plus, RotateCcw, Search, Share2, ShoppingBag, ShoppingCart, SlidersHorizontal, Trash2, Upload, Users, Wallet, X,
+  Lock, Pencil, Plus, RotateCcw, Search, Share2, ShoppingBag, ShoppingCart, SlidersHorizontal, Trash2, Upload, Users, Wallet, X,
 } from 'lucide-react'
 import {
   CATEGORIES, checkSession, deleteCustomer, deleteExpense, deleteOrder, deletePurchase, deleteProduct,
@@ -14,6 +14,8 @@ import {
 } from '@/lib/store'
 import { fromBase64Url, toBase64Url } from '@/lib/push'
 import { CURRENCIES, formatMoney } from '@/lib/format'
+import { puede, textoCandado } from '@/lib/plan'
+import type { Funcion, Plan } from '@/lib/plan'
 import {
   hasOwnPrice, normalizeVariants, optionFromName, optionPrice, optionStock, parseOptions, priceRange, tracksOptionStock,
 } from '@/lib/variants'
@@ -34,7 +36,7 @@ type ImageTrashRow = { id: number; path: string; url: string; reason: string; de
 type Fund = 'capital' | 'reinversion'
 type Purchase = { id: number; productId: number; productName: string; option: string; fund: Fund; quantity: number; unitCost: number; totalCost: number; remainingQuantity: number; notes: string; createdAt: string }
 type Expense = { id: number; type: 'negocio' | 'personal'; description: string; amount: number; createdAt: string }
-type AdminData = { products: Product[]; orders: Order[]; customers: Customer[]; content: Record<string, string>; purchases: Purchase[]; expenses: Expense[]; trash: { products: Product[]; orders: Order[]; customers: Customer[]; images: ImageTrashRow[] } }
+type AdminData = { plan: Plan; demo: boolean; products: Product[]; orders: Order[]; customers: Customer[]; content: Record<string, string>; purchases: Purchase[]; expenses: Expense[]; trash: { products: Product[]; orders: Order[]; customers: Customer[]; images: ImageTrashRow[] } }
 
 /** Una opción (color/diseño/modelo) mientras se edita el producto. `key`
  * no cambia aunque se le cambie el nombre, y `originalName` es el nombre
@@ -235,7 +237,7 @@ function buildInvoiceDoc(JsPDF: any, order: Order) {
   return doc
 }
 
-type ContentField = { key: string; label: string; type?: 'textarea' | 'select' | 'image'; options?: Array<{ value: string; label: string }> }
+type ContentField = { key: string; label: string; type?: 'textarea' | 'select' | 'image'; options?: Array<{ value: string; label: string }>; feature?: Funcion }
 const CONTENT_GROUPS: Array<{ title: string; hint?: string; fields: ContentField[] }> = [
   { title: 'Marca', fields: [
     { key: 'brandName', label: 'Nombre de la tienda' },
@@ -252,14 +254,14 @@ const CONTENT_GROUPS: Array<{ title: string; hint?: string; fields: ContentField
     { key: 'contactEmail', label: 'Correo de contacto' },
     { key: 'instagram', label: 'Usuario de Instagram' },
     { key: 'schedule', label: 'Horario de atención' },
-    { key: 'paymentMethods', label: 'Métodos de pago (sepáralos con coma, ej.: Transferencia, Efectivo). Déjalo vacío para no mostrarlos.' },
-    { key: 'notificationEmail', label: 'Correos para avisos de pedidos (opcional; si son varios, sepáralos con coma; no se muestran en la tienda)' },
+    { key: 'paymentMethods', label: 'Métodos de pago (sepáralos con coma, ej.: Transferencia, Efectivo). Déjalo vacío para no mostrarlos.', feature: 'metodosPago' },
+    { key: 'notificationEmail', label: 'Correos para avisos de pedidos (opcional; si son varios, sepáralos con coma; no se muestran en la tienda)', feature: 'avisosCorreo' },
   ] },
   { title: 'Menú y carrito', fields: [
     { key: 'navCatalog', label: 'Menú: catálogo' },
     { key: 'navContact', label: 'Menú: contacto' },
-    { key: 'cartTitle', label: 'Título del carrito' },
-    { key: 'checkoutTitle', label: 'Título al completar el pedido' },
+    { key: 'cartTitle', label: 'Título del carrito', feature: 'carrito' },
+    { key: 'checkoutTitle', label: 'Título al completar el pedido', feature: 'carrito' },
   ] },
   { title: 'Políticas', hint: 'Se ven en la página de Políticas (enlace en el pie de página).', fields: [
     { key: 'policiesUpdated', label: 'Fecha de la última actualización' },
@@ -557,6 +559,17 @@ function daysLeft(deletedAt: string) {
   return Math.max(0, 30 - Math.floor(elapsed / 86400000))
 }
 
+// Qué ofrece cada función bloqueada (se ve en la demo, con el candado).
+const LOCK_TEXT: Partial<Record<Funcion, string>> = {
+  opciones: 'Dale a cada producto varias opciones (aroma, tamaño…) con su propia foto, precio y cantidad.',
+  pedidos: 'Recibe los pedidos de tu tienda con su estado, descuentos y factura en PDF, y registra tus ventas por fuera.',
+  clientes: 'Guarda los datos de tus clientes para volver a escribirles cuando quieras.',
+  lotes: 'Registra cada compra con su costo para saber cuánto ganas de verdad en cada venta.',
+  finanzas: 'Mira cuánto ganas, cuánto tienes para comprar mercancía y cuánto puedes retirar.',
+  app: 'Instala el panel como app en tu teléfono y recibe un aviso por cada pedido nuevo.',
+  papelera: 'Recupera durante 30 días lo que eliminaste por error.',
+}
+
 export function AdminPanel() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
   const [password, setPassword] = useState('')
@@ -587,6 +600,13 @@ export function AdminPanel() {
   const [notice, setNotice] = useState('')
   const [uploadingContent, setUploadingContent] = useState('')
 
+  // Plan de esta web (viene del servidor). Sin datos todavía = completo: así
+  // nada se esconde por error mientras carga. Ver src/lib/plan.ts.
+  const plan: Plan = data?.plan ?? 'completo'
+  const demo = data?.demo ?? false
+  const can = (funcion: Funcion) => puede(plan, funcion)
+  const appOk = data ? puede(data.plan, 'app') : false
+
   async function refresh() {
     const adminData = await getAdminData()
     CURRENCY = adminData.content.currency || 'DOP'
@@ -607,17 +627,17 @@ export function AdminPanel() {
   }, [])
 
   // Solo con la sesión abierta se ofrece instalar el panel como app.
-  useEffect(() => { setAdminManifest(authenticated === true) }, [authenticated])
+  useEffect(() => { setAdminManifest(authenticated === true && appOk) }, [authenticated, appOk])
 
   // Con la sesión abierta, cada vez que se abre o se vuelve al panel se
   // revisa que los avisos sigan encendidos en este aparato (ver ensurePushActive).
   useEffect(() => {
-    if (authenticated !== true) return
+    if (authenticated !== true || !appOk) return
     void ensurePushActive(true)
     const onVisible = () => { if (document.visibilityState === 'visible') void ensurePushActive() }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [authenticated])
+  }, [authenticated, appOk])
 
   // La notificación de un pedido abre /admin?tab=pedidos. Y al abrir o
   // volver a la app se quitan el punto del ícono y las notificaciones ya vistas.
@@ -738,7 +758,7 @@ export function AdminPanel() {
       if (!draft.id) createdId = Number(id)
       setEditing(null)
     })
-    if (createdId) setPendingRestock(createdId)
+    if (createdId && can('lotes')) setPendingRestock(createdId)
   }
 
   async function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
@@ -907,7 +927,7 @@ export function AdminPanel() {
         items: saleDraft.lines.map((line) => ({ productId: Number(line.productId), option: line.option, quantity: Math.round(Number(line.quantity || 0)), price: cents(line.price) })),
       } })
       setSaleDraft(null)
-      setNotice(`Venta ${result.orderNumber} registrada por ${money(result.total)}. Ya se descontó del inventario y cuenta en Finanzas.`)
+      setNotice(`Venta ${result.orderNumber} registrada por ${money(result.total)}. Ya se descontó del inventario${can('finanzas') ? ' y cuenta en Finanzas' : ''}.`)
     })
   }
 
@@ -970,7 +990,8 @@ export function AdminPanel() {
   // venderse, su costo cuenta como 0 y la ganancia sale inflada.
   const remainingByProduct = new Map<number, number>()
   for (const purchase of data.purchases) remainingByProduct.set(purchase.productId, (remainingByProduct.get(purchase.productId) ?? 0) + (purchase.remainingQuantity ?? 0))
-  const uncostedProducts = data.products.filter((product) => product.stock > (remainingByProduct.get(product.id) ?? 0) && product.cost === 0)
+  // Solo importa en el plan con compras por lotes (Completo).
+  const uncostedProducts = can('lotes') ? data.products.filter((product) => product.stock > (remainingByProduct.get(product.id) ?? 0) && product.cost === 0) : []
   const uncostedIds = new Set(uncostedProducts.map((product) => product.id))
   const matchesCatalogFilter = (product: Product, filter: CatalogFilter) =>
     filter === 'todos' ? true
@@ -1029,15 +1050,30 @@ export function AdminPanel() {
   const disponibleRetirar = paraTi + gananciaPropia - gastosPersonales
   const inventoryValue = data.purchases.reduce((sum, purchase) => sum + purchase.remainingQuantity * purchase.unitCost, 0)
 
-  const TABS: Array<{ id: Tab; label: string; icon: ComponentType<{ size?: number }> }> = [
+  const TABS: Array<{ id: Tab; label: string; icon: ComponentType<{ size?: number }>; feature?: Funcion }> = [
     { id: 'resumen', label: 'Inicio', icon: LayoutDashboard },
     { id: 'catalogo', label: 'Productos', icon: Package },
-    { id: 'pedidos', label: `Pedidos${pendingOrders ? ` (${pendingOrders})` : ''}`, icon: ListOrdered },
-    { id: 'finanzas', label: 'Finanzas', icon: Wallet },
-    { id: 'clientes', label: 'Clientes', icon: Users },
+    { id: 'pedidos', label: `Pedidos${pendingOrders ? ` (${pendingOrders})` : ''}`, icon: ListOrdered, feature: 'pedidos' },
+    { id: 'finanzas', label: 'Finanzas', icon: Wallet, feature: 'finanzas' },
+    { id: 'clientes', label: 'Clientes', icon: Users, feature: 'clientes' },
     { id: 'contenido', label: 'Textos', icon: Pencil },
-    { id: 'papelera', label: `Papelera${trashTotal ? ` (${trashTotal})` : ''}`, icon: Trash2 },
+    { id: 'papelera', label: `Papelera${trashTotal ? ` (${trashTotal})` : ''}`, icon: Trash2, feature: 'papelera' },
   ]
+  // En la web de un cliente, lo que su plan no incluye no sale. En la demo sale
+  // con un candado y el texto «Disponible en el plan …».
+  const visibleTabs = TABS.filter((item) => !item.feature || can(item.feature) || demo)
+  const currentTab: Tab = visibleTabs.some((item) => item.id === tab) ? tab : 'resumen'
+  const lockedTab = visibleTabs.find((item) => item.id === currentTab)
+  const lockedFeature = lockedTab?.feature && !can(lockedTab.feature) ? lockedTab.feature : null
+  const showTab = (id: Tab) => currentTab === id && !lockedFeature
+  const lockNotice = (label: string, funcion: Funcion) => window.alert(`${label}: ${textoCandado(funcion)}.`)
+  // Botones con candado (solo en la demo, para ver lo que se gana al subir de plan).
+  const lockedAction = (label: string, Icon: ComponentType<{ size?: number }>, funcion: Funcion) => demo && !can(funcion)
+    ? <button type="button" className="is-locked" title={textoCandado(funcion)} onClick={() => lockNotice(label, funcion)}><Icon size={14} />{label}<Lock size={11} /></button>
+    : null
+  const lockedQuick = (label: string, Icon: ComponentType<{ size?: number }>, funcion: Funcion) => demo && !can(funcion)
+    ? <button type="button" className="is-locked" title={textoCandado(funcion)} onClick={() => lockNotice(label, funcion)}><Icon size={20} /><span>{label}</span><small className="lock-tag"><Lock size={11} />{textoCandado(funcion)}</small></button>
+    : null
 
   const goTab = (id: Tab) => { setTab(id); setQuery(''); setCatalogFilter('todos'); setCatalogCategory(''); setNotice('') }
 
@@ -1059,7 +1095,10 @@ export function AdminPanel() {
         <span className="drawer-kicker">RITUAL COBRE</span>
         <h1>Panel admin</h1>
         <nav>
-          {TABS.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => goTab(id)}><Icon size={17} />{label}</button>)}
+          {visibleTabs.map(({ id, label, icon: Icon, feature }) => {
+            const isLocked = Boolean(feature && !can(feature))
+            return <button key={id} className={`${currentTab === id ? 'active' : ''} ${isLocked ? 'is-locked' : ''}`} title={feature && isLocked ? textoCandado(feature) : undefined} onClick={() => goTab(id)}><Icon size={17} />{label}{isLocked && <Lock size={13} />}</button>
+          })}
         </nav>
         <div className="admin-sidebar-footer">
           <Link to="/"><ChevronLeft size={15} />Ver la tienda</Link>
@@ -1071,18 +1110,30 @@ export function AdminPanel() {
         {error && !modalOpen && <p className="form-error admin-error">{error}</p>}
         {notice && <p className="admin-notice"><Check size={15} />{notice}<button type="button" onClick={() => setNotice('')} aria-label="Cerrar"><X size={14} /></button></p>}
 
-        {tab === 'resumen' && (
+        {lockedFeature && lockedTab && (
+          <section>
+            <h2>{lockedTab.label}</h2>
+            <div className="plan-lock">
+              <Lock size={30} />
+              <strong>{textoCandado(lockedFeature)}</strong>
+              <p>{LOCK_TEXT[lockedFeature] ?? 'Esta función no está incluida en este plan.'}</p>
+            </div>
+          </section>
+        )}
+
+        {showTab('resumen') && (
           <section>
             <h2>Inicio</h2>
-            <AppAndNotifications />
+            {can('app') && <AppAndNotifications />}
+            {demo && !can('app') && <div className="plan-lock plan-lock-inline"><Lock size={18} /><div><strong>App del panel con avisos de pedidos</strong><span>{textoCandado('app')}</span></div></div>}
             <div className="quick-actions">
-              <button type="button" onClick={() => openSale()}><ShoppingCart size={20} /><span>Registrar venta</span></button>
-              <button type="button" onClick={() => openPurchase()}><ShoppingBag size={20} /><span>Registrar compra</span></button>
+              {can('pedidos') ? <button type="button" onClick={() => openSale()}><ShoppingCart size={20} /><span>Registrar venta</span></button> : lockedQuick('Registrar venta', ShoppingCart, 'pedidos')}
+              {can('lotes') ? <button type="button" onClick={() => openPurchase()}><ShoppingBag size={20} /><span>Registrar compra</span></button> : lockedQuick('Registrar compra', ShoppingBag, 'lotes')}
               <button type="button" onClick={() => { goTab('catalogo'); setEditing(emptyDraft()) }}><Plus size={20} /><span>Nuevo producto</span></button>
             </div>
             <div className="admin-cards">
-              <div className="admin-card"><span>Pedidos pendientes</span><strong>{pendingOrders}</strong></div>
-              <div className="admin-card"><span>Por cobrar ({porCobrarOrders.length})</span><strong>{money(porCobrar)}</strong></div>
+              {can('pedidos') && <div className="admin-card"><span>Pedidos pendientes</span><strong>{pendingOrders}</strong></div>}
+              {can('pedidos') && <div className="admin-card"><span>Por cobrar ({porCobrarOrders.length})</span><strong>{money(porCobrar)}</strong></div>}
               <div className="admin-card"><span>Productos agotados</span><strong>{outOfStock}</strong></div>
               <div className="admin-card"><span>Quedan pocos (≤3)</span><strong>{lowStock.length}</strong></div>
             </div>
@@ -1092,23 +1143,27 @@ export function AdminPanel() {
                 {lowStock.slice(0, 8).map((product) => <div className="admin-row admin-row-product" key={product.id}>
                   <img src={product.image || '/placeholder.png'} alt="" />
                   <div><strong>{product.name}</strong><span>Quedan {product.stock}</span></div>
-                  <button className="ghost-button" onClick={() => openPurchase(product)}>Reponer</button>
+                  {can('lotes')
+                    ? <button className="ghost-button" onClick={() => openPurchase(product)}>Reponer</button>
+                    : <button className="ghost-button" onClick={() => { goTab('catalogo'); setError(''); setEditing(toDraft(product)) }}>Editar</button>}
                 </div>)}
               </div>
             </>}
-            <h3>Últimos pedidos</h3>
-            <div className="admin-table">
-              {data.orders.slice(0, 6).map((order) => <div className="admin-row" key={order.id}>
-                <div><strong>{order.orderNumber}</strong><span>{order.customerName}</span></div>
-                <span className={`status-pill status-${order.status.toLowerCase()}`}>{order.status}</span>
-                <strong>{money(order.total)}</strong>
-              </div>)}
-              {!data.orders.length && <p className="admin-empty">Todavía no hay pedidos.</p>}
-            </div>
+            {can('pedidos') && <>
+              <h3>Últimos pedidos</h3>
+              <div className="admin-table">
+                {data.orders.slice(0, 6).map((order) => <div className="admin-row" key={order.id}>
+                  <div><strong>{order.orderNumber}</strong><span>{order.customerName}</span></div>
+                  <span className={`status-pill status-${order.status.toLowerCase()}`}>{order.status}</span>
+                  <strong>{money(order.total)}</strong>
+                </div>)}
+                {!data.orders.length && <p className="admin-empty">Todavía no hay pedidos.</p>}
+              </div>
+            </>}
           </section>
         )}
 
-        {tab === 'finanzas' && (
+        {showTab('finanzas') && (
           <section>
             <h2>Finanzas</h2>
             <div className="quick-actions">
@@ -1205,7 +1260,7 @@ export function AdminPanel() {
           </section>
         )}
 
-        {tab === 'catalogo' && (
+        {showTab('catalogo') && (
           <section>
             <div className="admin-section-head">
               <h2>Productos</h2>
@@ -1225,11 +1280,12 @@ export function AdminPanel() {
             </div>
             <div className="admin-table">
               {catalogProducts.map((product) => {
-                const options = parseOptions(product.options)
-                const tracking = tracksOptionStock(product)
+                // Sin «opciones» en el plan, el producto se ve como uno solo (sus opciones siguen guardadas).
+                const options = can('opciones') ? parseOptions(product.options) : []
+                const tracking = can('opciones') && tracksOptionStock(product)
                 const range = priceRange(product)
-                const ranged = range.min !== range.max
-                const margin = !ranged && product.price > 0 && product.cost > 0 ? Math.round(((product.price - product.cost) / product.price) * 100) : null
+                const ranged = can('opciones') && range.min !== range.max
+                const margin = can('lotes') && !ranged && product.price > 0 && product.cost > 0 ? Math.round(((product.price - product.cost) / product.price) * 100) : null
                 const noCost = uncostedIds.has(product.id)
                 const lotCount = lotsByProduct.get(product.id)?.length ?? 0
                 return <div className={`prod-row ${!product.active ? 'is-hidden' : ''}`} key={product.id}>
@@ -1244,7 +1300,7 @@ export function AdminPanel() {
                     <span className="prod-row-cat">{product.category}{options.length > 0 ? ` · ${options.length} ${options.length === 1 ? 'opción' : 'opciones'}` : ''}</span>
                     <div className="prod-row-pills">
                       <span className={`pill ${product.stock === 0 ? 'pill-bad' : product.stock <= 3 ? 'pill-warn' : 'pill-ok'}`}>{product.stock === 0 ? 'Agotado' : `${product.stock} en existencia`}</span>
-                      {noCost ? <span className="pill pill-bad">Sin costo registrado</span> : !tracking && <span className="pill">Costo {money(product.cost)}</span>}
+                      {noCost ? <span className="pill pill-bad">Sin costo registrado</span> : can('lotes') && !tracking && <span className="pill">Costo {money(product.cost)}</span>}
                       {margin !== null && <span className={`pill ${margin < 15 ? 'pill-warn' : ''}`}>Margen {margin}%</span>}
                       {tracking && <span className="pill pill-info">Cantidad por opción</span>}
                       {!product.active && <span className="pill">Oculto</span>}
@@ -1260,10 +1316,10 @@ export function AdminPanel() {
                   </div>
                   <div className="prod-row-actions">
                     <button type="button" onClick={() => { setError(''); setEditing(toDraft(product)) }}><Pencil size={14} />Editar</button>
-                    <button type="button" onClick={() => openPurchase(product)}><ShoppingBag size={14} />Reponer</button>
-                    <button type="button" disabled={product.stock <= 0} onClick={() => openSale(product)}><ShoppingCart size={14} />Vender</button>
-                    <button type="button" disabled={!lotCount} onClick={() => setLotsProductId(product.id)}><Layers size={14} />Compras</button>
-                    <button type="button" className="danger" aria-label="Enviar a la papelera" onClick={() => { if (window.confirm(`¿Enviar «${product.name}» a la papelera? Deja de verse en la tienda; lo puedes restaurar durante 30 días.`)) withBusy(() => deleteProduct({ data: product.id })) }}><Trash2 size={14} /></button>
+                    {can('lotes') ? <button type="button" onClick={() => openPurchase(product)}><ShoppingBag size={14} />Reponer</button> : lockedAction('Reponer', ShoppingBag, 'lotes')}
+                    {can('pedidos') ? <button type="button" disabled={product.stock <= 0} onClick={() => openSale(product)}><ShoppingCart size={14} />Vender</button> : lockedAction('Vender', ShoppingCart, 'pedidos')}
+                    {can('lotes') ? <button type="button" disabled={!lotCount} onClick={() => setLotsProductId(product.id)}><Layers size={14} />Compras</button> : lockedAction('Compras', Layers, 'lotes')}
+                    <button type="button" className="danger" aria-label="Enviar a la papelera" onClick={() => { if (window.confirm(can('papelera') ? `¿Enviar «${product.name}» a la papelera? Deja de verse en la tienda; lo puedes restaurar durante 30 días.` : `¿Eliminar «${product.name}»? Deja de verse en la tienda.`)) withBusy(() => deleteProduct({ data: product.id })) }}><Trash2 size={14} /></button>
                   </div>
                 </div>
               })}
@@ -1272,13 +1328,13 @@ export function AdminPanel() {
           </section>
         )}
 
-        {tab === 'pedidos' && (
+        {showTab('pedidos') && (
           <section>
             <div className="admin-section-head">
               <h2>Pedidos</h2>
               <button className="primary-button" onClick={() => openSale()}><ShoppingCart size={16} />Registrar venta por fuera</button>
             </div>
-            <p className="admin-hint">¿Vendiste algo en persona o por WhatsApp? Regístralo con «Registrar venta por fuera»: se descuenta del inventario y se suma a Finanzas.</p>
+            <p className="admin-hint">¿Vendiste algo en persona o por WhatsApp? Regístralo con «Registrar venta por fuera»: se descuenta del inventario{can('finanzas') ? ' y se suma a Finanzas' : ''}.</p>
             <label className="search-field admin-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por número, cliente o teléfono..." /></label>
             <div className="admin-table">
               {filteredOrders.map((order) => <div className="admin-order" key={order.id}>
@@ -1288,12 +1344,12 @@ export function AdminPanel() {
                     <button className="icon-button" title="Editar pedido" onClick={() => { setError(''); setEditingOrder({ id: order.id, customerName: order.customerName, email: order.email, phone: order.phone, address: order.address, notes: order.notes, items: order.items.map((item) => ({ ...item, option: item.option ?? optionFromName(item.name) })), discount: order.discount }) }}><Pencil size={15} /></button>
                     <button className="icon-button" title="Descargar factura (PDF)" disabled={busy} onClick={() => handleDownloadInvoice(order)}><Download size={15} /></button>
                     <button className="icon-button" title="Compartir factura" disabled={busy} onClick={() => handleShareInvoice(order)}><Share2 size={15} /></button>
-                    <button className="icon-button" title="Enviar a la papelera" onClick={() => { if (window.confirm(order.status === 'Cancelado' ? '¿Enviar este pedido a la papelera?' : '¿Enviar este pedido a la papelera?\n\nOjo: esto NO devuelve las unidades al inventario. Si el pedido no se concretó, primero cámbialo a "Cancelado" (eso sí las devuelve).')) withBusy(() => deleteOrder({ data: order.id })) }}><Trash2 size={15} /></button>
+                    <button className="icon-button" title="Enviar a la papelera" onClick={() => { if (window.confirm(`${can('papelera') ? '¿Enviar este pedido a la papelera?' : '¿Eliminar este pedido?'}${order.status === 'Cancelado' ? '' : '\n\nOjo: esto NO devuelve las unidades al inventario. Si el pedido no se concretó, primero cámbialo a "Cancelado" (eso sí las devuelve).'}`)) withBusy(() => deleteOrder({ data: order.id })) }}><Trash2 size={15} /></button>
                   </div>
                 </div>
                 <p className="admin-order-customer">{order.customerName} · {order.phone}{order.address ? ` · ${order.address}` : ''}</p>
                 <ul className="admin-order-items">{order.items.map((item, index) => <li key={`${item.id}-${index}`}>
-                  <div>{item.quantity}× {item.name}<small>Costó {money(item.cost)} cada una · ganancia {money((item.price - item.cost) * item.quantity)}{(item.reinvQty ?? 0) > 0 ? (item.reinvQty === item.quantity ? ' · con el dinero para reinvertir' : ` · ${item.reinvQty} de ${item.quantity} con el dinero para reinvertir`) : ''}</small></div>
+                  <div>{item.quantity}× {item.name}{can('finanzas') && <small>Costó {money(item.cost)} cada una · ganancia {money((item.price - item.cost) * item.quantity)}{(item.reinvQty ?? 0) > 0 ? (item.reinvQty === item.quantity ? ' · con el dinero para reinvertir' : ` · ${item.reinvQty} de ${item.quantity} con el dinero para reinvertir`) : ''}</small>}</div>
                   <span>{money(item.price * item.quantity)}</span>
                 </li>)}</ul>
                 <div className="admin-order-foot">
@@ -1318,7 +1374,7 @@ export function AdminPanel() {
           </section>
         )}
 
-        {tab === 'clientes' && (
+        {showTab('clientes') && (
           <section>
             <div className="admin-section-head">
               <h2>Clientes</h2>
@@ -1338,16 +1394,16 @@ export function AdminPanel() {
           </section>
         )}
 
-        {tab === 'contenido' && (
+        {showTab('contenido') && (
           <section>
             <div className="admin-section-head">
               <h2>Textos de la tienda</h2>
               <button className="primary-button" disabled={busy} onClick={handleSaveContent}><Check size={16} />{busy ? 'Guardando…' : 'Guardar cambios'}</button>
             </div>
             {CONTENT_GROUPS.map((group) => <div className="content-group" key={group.title}>
-              <h3>{group.title}</h3>
+              <h3>{group.title === 'Menú y carrito' && !can('carrito') ? 'Menú' : group.title}</h3>
               {group.hint && <p className="content-hint">{group.hint}</p>}
-              {group.fields.map((field) => <label className="content-field" key={field.key}>
+              {group.fields.filter((field) => !field.feature || can(field.feature)).map((field) => <label className="content-field" key={field.key}>
                 <span>{field.label}</span>
                 {field.type === 'textarea'
                   ? <textarea rows={3} value={contentDraft[field.key] ?? ''} onChange={(event) => setContentDraft((current) => ({ ...current, [field.key]: event.target.value }))} />
@@ -1366,7 +1422,7 @@ export function AdminPanel() {
           </section>
         )}
 
-        {tab === 'papelera' && (
+        {showTab('papelera') && (
           <section>
             <h2>Papelera</h2>
             <p className="admin-hint"><AlertTriangle size={14} />Lo que envíes aquí se elimina definitivamente (junto a su imagen) 30 días después.</p>
@@ -1442,6 +1498,7 @@ export function AdminPanel() {
             <p className="content-hint">Si las opciones de abajo tienen un precio distinto, se lo pones a cada una. Las que no tengan precio propio usan este.</p>
           </fieldset>
 
+          {can('opciones') ? <>
           <fieldset className="form-section">
             <legend>3 · Opciones (colores, diseños o modelos)</legend>
             <p className="content-hint">Déjalo vacío si el producto es uno solo. Si en esta misma tarjeta hay varios (ej. varios aromas o tamaños), agrégalos aquí — cada uno puede tener su foto, su precio y su cantidad.</p>
@@ -1464,7 +1521,7 @@ export function AdminPanel() {
                 <div className="option-card-grid">
                   <label>Precio<input type="number" inputMode="decimal" min={0} step="0.01" value={option.price} onChange={(event) => updateOption(option.key, { price: event.target.value })} placeholder={editing.price ? `Igual: ${money(cents(editing.price))}` : 'Igual al general'} /></label>
                   {editing.optionStock && (
-                    <label>Cantidad<input type="number" inputMode="numeric" min={0} value={editing.id ? option.stock : '0'} disabled={!editing.id} onChange={(event) => updateOption(option.key, { stock: event.target.value })} /></label>
+                    <label>Cantidad<input type="number" inputMode="numeric" min={0} value={editing.id || !can('lotes') ? option.stock : '0'} disabled={!editing.id && can('lotes')} onChange={(event) => updateOption(option.key, { stock: event.target.value })} /></label>
                   )}
                 </div>
                 <input value={option.description} onChange={(event) => updateOption(option.key, { description: event.target.value })} placeholder="Descripción de esta opción (opcional)" aria-label="Descripción de la opción" />
@@ -1473,10 +1530,12 @@ export function AdminPanel() {
             ))}
             <button type="button" className="ghost-button add-option" onClick={() => setEditing((current) => current && { ...current, options: [...current.options, emptyOption()] })}><Plus size={15} />Agregar opción</button>
           </fieldset>
+          </>
+          : demo && <p className="plan-lock plan-lock-inline"><Lock size={18} /><span><strong>Opciones por producto</strong>{textoCandado('opciones')}</span></p>}
 
           <fieldset className="form-section">
-            <legend>4 · Cantidad en existencia</legend>
-            {!editing.id ? (
+            <legend>{can('opciones') ? 4 : 3} · Cantidad en existencia</legend>
+            {!editing.id && can('lotes') ? (
               <p className="admin-hint"><AlertTriangle size={14} />Un producto nuevo empieza en 0. Al guardar se abre «Reponer» para que pongas cuántas compraste y a cuánto — así el costo queda registrado.</p>
             ) : editing.optionStock && editing.options.length > 0 ? (
               <p className="option-total">Total: <b>{editingSum}</b> unidades (la suma de las opciones){editingOriginal && !editingOriginal.optionStock && editingOriginal.stock !== editingSum ? <span> · antes había {editingOriginal.stock} en total: reparte esa cantidad entre las opciones</span> : null}</p>
@@ -1485,11 +1544,13 @@ export function AdminPanel() {
                 <label>Existencias<input required type="number" inputMode="numeric" min={0} value={editing.stock} onChange={(event) => setEditing((current) => current && { ...current, stock: event.target.value })} /></label>
               </>
             )}
-            {editing.id && <p className="content-hint">Estos números solo corrigen el conteo (no suman dinero ni costo). Para mercancía nueva usa «Reponer».</p>}
+            {can('lotes')
+              ? editing.id && <p className="content-hint">Estos números solo corrigen el conteo (no suman dinero ni costo). Para mercancía nueva usa «Reponer».</p>
+              : <p className="content-hint">Pon cuántas unidades tienes. Cuando se venda algo, baja solo.</p>}
           </fieldset>
 
           <fieldset className="form-section">
-            <legend>5 · En la tienda</legend>
+            <legend>{can('opciones') ? 5 : 4} · En la tienda</legend>
             <div className="form-checks">
               <label><input type="checkbox" checked={editing.active} onChange={(event) => setEditing((current) => current && { ...current, active: event.target.checked })} />Visible en la tienda</label>
               <label><input type="checkbox" checked={editing.featured} onChange={(event) => setEditing((current) => current && { ...current, featured: event.target.checked })} />Destacado</label>
@@ -1672,7 +1733,7 @@ export function AdminPanel() {
       {saleDraft && <div className="modal-wrap"><div className="modal-card">
         <button className="modal-close icon-button" onClick={() => setSaleDraft(null)}><X /></button>
         <h2>Registrar venta por fuera</h2>
-        <p>Para lo que vendiste en persona o por WhatsApp. Se descuenta del inventario y cuenta en Finanzas igual que un pedido de la tienda. El precio lo pones tú (puede ser un precio especial).</p>
+        <p>Para lo que vendiste en persona o por WhatsApp. Se descuenta del inventario{can('finanzas') ? ' y cuenta en Finanzas' : ''} igual que un pedido de la tienda. El precio lo pones tú (puede ser un precio especial).</p>
         <form className="product-form" onSubmit={handleSaveSale}>
           {saleDraft.lines.map((line, index) => {
             const product = data.products.find((item) => String(item.id) === line.productId)
