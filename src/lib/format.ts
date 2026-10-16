@@ -18,6 +18,13 @@ const formatters = new Map<string, Intl.NumberFormat>()
 export function formatMoney(cents: number, currency = 'USD') {
   const option = CURRENCIES.find((item) => item.code === currency) ?? CURRENCIES[0]
   const code = option.code
+  // Pesos dominicanos con función propia: el formato del navegador en
+  // Android escribe «DOP 1,250.00» en lugar de «RD$1,250.00».
+  if (code === 'DOP') {
+    const value = (Number(cents) || 0) / 100
+    const [whole, decimals] = Math.abs(value).toFixed(2).split('.')
+    return `${value < 0 ? '-' : ''}RD$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${decimals}`
+  }
   let formatter = formatters.get(code)
   if (!formatter) {
     formatter = new Intl.NumberFormat(option.locale, { style: 'currency', currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 })

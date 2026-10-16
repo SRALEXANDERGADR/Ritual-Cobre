@@ -39,6 +39,9 @@ export const products = pgTable('products', {
   // true = "Cada opción tiene su propia cantidad": se vende, se repone y se
   // cuenta por opción, y `stock` pasa a ser la suma de todas las opciones.
   optionStock: boolean('option_stock').notNull().default(false),
+  // Días que tiene el cliente para cambiar el producto después de recibirlo
+  // (0 = sin cambio). Se copia a cada línea del pedido al venderlo.
+  exchangeDays: integer('exchange_days').notNull().default(0),
   featured: boolean('featured').notNull().default(false), // pestaña Destacados
   isNew: boolean('is_new').notNull().default(false), // pestaña Nuevos
   bestSeller: boolean('best_seller').notNull().default(false), // pestaña Más vendidos
@@ -85,7 +88,8 @@ export const orders = pgTable('orders', {
   // `reinvQty` = cuántas de esas unidades salieron de lotes comprados con el
   // "Dinero para reinvertir", y `reinvCost` lo que costaron EN TOTAL (no por
   // unidad). Sin estos campos = todo salió del dinero del negocio.
-  items: jsonb('items').notNull().$type<Array<{ id: number; name: string; price: number; quantity: number; cost: number; option?: string; reinvCost?: number; reinvQty?: number }>>(),
+  // `exchangeDays` = días para cambio que tenía el producto al venderlo.
+  items: jsonb('items').notNull().$type<Array<{ id: number; name: string; price: number; quantity: number; cost: number; option?: string; reinvCost?: number; reinvQty?: number; exchangeDays?: number }>>(),
   // Descuento manual aplicado por el admin al negociar con el cliente
   // (en centavos). 0 = sin descuento. `total` ya sale con el descuento
   // restado — se recalcula en el servidor cada vez que se edita el pedido.
@@ -94,6 +98,9 @@ export const orders = pgTable('orders', {
   status: text('status').notNull().default('Pendiente'), // Pendiente, Confirmado, Preparando, Enviado, Entregado, Cancelado
   paymentStatus: text('payment_status').notNull().default('Pendiente'), // Pendiente, Pagado
   notes: text('notes').notNull().default(''), // notas internas del admin
+  // Clave secreta del pedido: el teléfono del cliente la guarda para ver
+  // el pedido en «Mis compras» sin contraseña. '' = pedido de antes.
+  accessToken: text('access_token').notNull().default(''),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   deletedAt: timestamp('deleted_at'), // papelera
 })

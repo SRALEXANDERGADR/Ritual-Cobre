@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PoliticasRouteImport } from './routes/politicas'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ProductoIdRouteImport } from './routes/producto.$id'
 import { Route as FotosSplatRouteImport } from './routes/fotos/$'
 import { Route as ApiUploadRouteImport } from './routes/api/upload'
 import { Route as ApiPushRenewRouteImport } from './routes/api/push-renew'
@@ -29,6 +30,11 @@ const AdminRoute = AdminRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProductoIdRoute = ProductoIdRouteImport.update({
+  id: '/producto/$id',
+  path: '/producto/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FotosSplatRoute = FotosSplatRouteImport.update({
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/api/push-renew': typeof ApiPushRenewRoute
   '/api/upload': typeof ApiUploadRoute
   '/fotos/$': typeof FotosSplatRoute
+  '/producto/$id': typeof ProductoIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/api/push-renew': typeof ApiPushRenewRoute
   '/api/upload': typeof ApiUploadRoute
   '/fotos/$': typeof FotosSplatRoute
+  '/producto/$id': typeof ProductoIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +79,7 @@ export interface FileRoutesById {
   '/api/push-renew': typeof ApiPushRenewRoute
   '/api/upload': typeof ApiUploadRoute
   '/fotos/$': typeof FotosSplatRoute
+  '/producto/$id': typeof ProductoIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +90,7 @@ export interface FileRouteTypes {
     | '/api/push-renew'
     | '/api/upload'
     | '/fotos/$'
+    | '/producto/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/api/push-renew'
     | '/api/upload'
     | '/fotos/$'
+    | '/producto/$id'
   id:
     | '__root__'
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/api/push-renew'
     | '/api/upload'
     | '/fotos/$'
+    | '/producto/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +118,7 @@ export interface RootRouteChildren {
   ApiPushRenewRoute: typeof ApiPushRenewRoute
   ApiUploadRoute: typeof ApiUploadRoute
   FotosSplatRoute: typeof FotosSplatRoute
+  ProductoIdRoute: typeof ProductoIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -129,6 +142,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/producto/$id': {
+      id: '/producto/$id'
+      path: '/producto/$id'
+      fullPath: '/producto/$id'
+      preLoaderRoute: typeof ProductoIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/fotos/$': {
@@ -162,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPushRenewRoute: ApiPushRenewRoute,
   ApiUploadRoute: ApiUploadRoute,
   FotosSplatRoute: FotosSplatRoute,
+  ProductoIdRoute: ProductoIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

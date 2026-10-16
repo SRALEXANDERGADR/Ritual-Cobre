@@ -444,3 +444,68 @@ select.status-pill{border:0;border-radius:99px;padding:7px 12px;font:600 12px va
 .footer-payments>span{font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.7}
 .payment-tags{display:flex;flex-wrap:wrap;gap:8px}
 .payment-tags b{padding:6px 12px;border:1px solid currentColor;border-radius:99px;font-size:13px;font-weight:600;opacity:.9}
+/* ─── Plan Completo: «Mis compras», «Recomendar» y días para cambio ─── */
+.topbar-end{justify-self:end;display:flex;align-items:center;gap:16px}
+.purchases-button{position:relative;border:0;background:transparent;display:flex;gap:8px;align-items:center;cursor:pointer;color:var(--ink);padding:0}
+.purchases-button:after{content:'';position:absolute;top:-3px;left:14px;width:8px;height:8px;border-radius:50%;background:var(--clay);box-shadow:0 0 0 2px var(--paper)}
+.purchases-button:hover, .cart-button:hover{color:var(--clay)}
+.drawer-purchases{display:flex;align-items:center;justify-content:space-between;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);font:500 25px var(--font-display);padding:18px 0;cursor:pointer;text-align:left}
+.drawer-purchases span{display:flex;align-items:center;gap:12px}
+.drawer-purchases b{min-width:26px;height:26px;border-radius:99px;background:var(--clay);color:#fff;display:grid;place-items:center;font:500 11px var(--font-mono);padding:0 7px}
+.purchases-drawer{position:fixed;top:0;bottom:0;right:0;z-index:60;width:min(540px,96vw);background:var(--paper);padding:30px;display:flex;flex-direction:column;transform:translateX(105%);transition:transform .45s cubic-bezier(.77,0,.18,1);box-shadow:0 0 60px rgba(0,0,0,.2)}
+.purchases-drawer.open{transform:none}
+.purchases-drawer h2{font:600 39px var(--font-display);letter-spacing:-.04em;margin:7px 0}
+.purchases-head-actions{display:flex;gap:8px}
+.purchases-head-actions .icon-button:disabled{opacity:.4}
+.purchases-intro{font-size:13px;line-height:1.6;color:var(--muted);margin:6px 0 14px}
+.purchases-list{flex:1;overflow:auto;display:grid;gap:16px;align-content:start;margin:0 -6px;padding:0 6px 20px}
+.purchases-empty{display:grid;justify-items:center;gap:10px;text-align:center;color:var(--muted);padding:50px 10px;font-size:14px}
+.purchases-empty svg{width:34px;height:34px;color:var(--clay)}
+.purchase-card{background:var(--white);border:1px solid var(--line);border-top:3px solid var(--clay);padding:20px}
+.purchase-card.is-cancelled{border-top-color:var(--muted);opacity:.82}
+.purchase-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.purchase-folio{display:block;font:500 13px var(--font-mono);letter-spacing:.04em}
+.purchase-head small{display:block;margin-top:4px;font-size:12px;color:var(--muted)}
+.purchase-pay{flex-shrink:0;font:500 9px var(--font-mono);letter-spacing:.12em;text-transform:uppercase;padding:6px 9px;border-radius:99px;background:#f4e6cf;color:#8a5a1f}
+.purchase-pay.paid{background:#dcece1;color:#2f6b4b}
+.purchase-status{margin:18px 0 6px}
+.purchase-status strong{display:block;font:600 30px/1 var(--font-display);letter-spacing:-.05em}
+.purchase-card.is-cancelled .purchase-status strong{color:var(--clay)}
+.purchase-status p{margin:8px 0 12px;font-size:13px;line-height:1.5;color:#49515a}
+.purchase-track{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.purchase-track span{height:6px;background:#e7ddd5}
+.purchase-track span.done{background:var(--clay)}
+.purchase-next{display:block;margin-top:8px;font:500 10px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.purchase-items{list-style:none;margin:16px 0 4px;padding:0;border-top:1px solid var(--line)}
+.purchase-items li{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.purchase-items img{width:44px;height:52px;object-fit:cover;background:#e4dbd3}
+.purchase-items span{font-size:14px;font-weight:600;line-height:1.35}
+.purchase-items small{display:flex;align-items:center;gap:5px;margin-top:4px;font:10px var(--font-mono);letter-spacing:.04em;color:var(--clay)}
+.purchase-items b{font:600 14px var(--font-display);white-space:nowrap}
+.purchase-line{display:flex;justify-content:space-between;margin:8px 0 0;font-size:13px;color:var(--muted)}
+.purchase-total{color:var(--ink);font-size:16px}
+.purchase-total b{font:600 20px var(--font-display)}
+.purchase-actions{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:16px}
+.purchase-actions .ghost-button{padding:12px 16px}
+.purchase-cancel{border:0;background:none;color:var(--clay);font:600 11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;text-decoration:underline;text-underline-offset:4px;cursor:pointer;padding:8px 0}
+.purchase-confirm{margin-top:16px;background:#f7ece7;border-left:3px solid var(--clay);padding:14px}
+.purchase-confirm p{margin:0 0 12px;font-size:13px;line-height:1.55}
+.purchase-confirm div{display:flex;flex-wrap:wrap;gap:8px}
+.purchase-confirm .primary-button, .purchase-confirm .ghost-button{padding:11px 16px;gap:10px;font-size:13px}
+.purchase-help{display:inline-flex;align-items:center;gap:7px;margin-top:14px;font-size:13px;font-weight:600;color:var(--ink);text-underline-offset:4px}
+.purchase-help:hover{color:var(--clay)}
+.confirmation-note{font-size:12px;color:var(--muted);margin-top:16px}
+.checkout-saved{font:500 11px var(--font-mono)!important;letter-spacing:.04em;color:var(--clay)!important;margin:6px 0 0}
+.recommend-link{display:inline-flex;align-items:center;gap:6px;margin-top:12px;border:0;background:none;padding:4px 0;color:var(--clay);font:500 10px var(--font-mono);letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+.recommend-link:hover{color:var(--ink)}
+.quick-view-exchange{display:flex;align-items:flex-start;gap:9px;margin:0 0 16px;padding:12px 14px;background:var(--white);border:1px solid var(--line);font-size:13px;line-height:1.5}
+.quick-view-exchange svg{flex-shrink:0;margin-top:2px;color:var(--clay)}
+.quick-view-exchange a{color:var(--clay)}
+.quick-view-recommend{align-self:flex-start;display:inline-flex;align-items:center;gap:8px;margin-top:18px;border:0;border-bottom:1px solid var(--ink);background:none;padding:6px 0;font-weight:700;font-size:14px;color:var(--ink);cursor:pointer}
+.quick-view-recommend:hover{color:var(--clay);border-color:var(--clay)}
+@media(max-width:620px){.purchases-button span{display:none}
+.topbar-end{gap:14px}
+.purchases-drawer{padding:22px 18px}
+.purchases-drawer h2{font-size:32px}
+.purchase-card{padding:16px}
+.purchase-status strong{font-size:26px}}

@@ -48,6 +48,16 @@ export const FUNCIONES = {
   avisosCorreo: 'completo',
   /** Papelera de 30 días para recuperar lo eliminado. */
   papelera: 'completo',
+  /** «Mis compras» en la tienda: el cliente ve cómo va su pedido y, mientras
+   * siga pendiente, lo cambia (vuelve a la bolsa) o lo anula. */
+  misCompras: 'completo',
+  /** «Recomendar»: enlace de cada producto (/producto/<id>) que abre su ficha
+   * y, al pegarlo en WhatsApp o Facebook, sale con su foto y su precio. */
+  recomendar: 'completo',
+  /** Días para cambios de cada producto (ficha, «Mis compras» y recibo). */
+  cambios: 'completo',
+  /** Recibo en imagen para mandarlo por WhatsApp. */
+  reciboImagen: 'completo',
 } as const satisfies Record<string, Plan>
 
 export type Funcion = keyof typeof FUNCIONES

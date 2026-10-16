@@ -67,6 +67,10 @@ Es el MISMO código para los tres planes; el plan lo decide la variable `PLAN` d
 | App «RC Admin» con avisos al teléfono (`app`) | — | — | sí |
 | Aviso por correo de cada pedido (`avisosCorreo`) | — | — | sí |
 | Papelera de 30 días (`papelera`) | — | — | sí |
+| «Mis compras» en la tienda: el cliente sigue su pedido y lo cambia o anula (`misCompras`) | — | — | sí |
+| «Recomendar»: enlace `/producto/<id>` con foto y precio (`recomendar`) | — | — | sí |
+| Días para cambio por producto (`cambios`) | — | — | sí |
+| Recibo en imagen para WhatsApp (`reciboImagen`) | — | — | sí |
 
 Cómo se aplica:
 
@@ -75,7 +79,16 @@ Cómo se aplica:
 - **Servidor:** cada función de `store.ts` llama a `requierePlan()`. `getAdminData` solo lee y manda lo que el plan incluye. `saveContent` ignora los textos de funciones no incluidas (no los borra).
 - **Cambiar de plan NUNCA borra datos.** Al bajar, lo que sobra se esconde (los pedidos, compras, gastos, opciones y papelera siguen guardados); al subir, vuelve a salir. `saveProduct` conserva las opciones de un producto aunque el plan no las muestre.
 - **Existencias sin lotes (Básico y Profesional):** la cantidad se escribe directo en el producto (nuevo o existente) y, en Profesional, al vender sigue bajando sola. Solo con lotes (Completo) un producto nuevo empieza en 0 y se llena con «Reponer». Si luego se sube a Completo, esas unidades salen como «Sin costo registrado» hasta registrar sus compras.
-- **Lo que esta web NO tiene** (así que no está en ningún plan): «Mis pedidos» para el cliente, compartir artículo, socios y garantía.
+- **Lo que esta web NO tiene** (así que no está en ningún plan): socios.
+
+### Funciones del plan Completo que vienen de JB Tech Store (con otro nombre y otro diseño)
+
+- **«Mis compras»** (`misCompras`): cada pedido nuevo guarda una clave secreta (`orders.access_token`, se crea siempre, también en otros planes). El teléfono del cliente guarda número + clave (`localStorage` `rc-mis-compras`) y sus datos para el próximo pedido (`rc-cliente`). El botón «Mis compras» sale arriba junto a la bolsa y en el menú cuando ya hay compras. Cada compra muestra una barra de 5 tramos (Recibida → Confirmada → En preparación → En camino → Entregada). Mientras esté «Pendiente» y sin pagar: «Cambiar mi compra» (se anula y sus productos vuelven a la bolsa) o «Anular» (con confirmación dentro de la tarjeta). Servidor: `getMyPurchases` y `cancelMyPurchase` en `store.ts` (devuelven las unidades, dejan nota en el pedido y avisan a la app). Al cliente nunca se le manda el costo.
+- **«Recomendar»** (`recomendar`): botón en cada producto y en su ficha. Comparte `/producto/<id>` (`src/routes/producto.$id.tsx`), que abre la tienda con esa ficha abierta y trae las etiquetas `og:` con la foto, el nombre y el precio. El enlace funciona en cualquier plan; el botón es del Completo.
+- **Días para cambio** (`cambios`): `products.exchange_days` (entero, 0 = sin cambio; columna creada en `ensureSchema`). Botones rápidos en el producto (Sin cambio, 3, 7, 15, 30 días). Se copia a la línea del pedido (`items[].exchangeDays`) al vender y se puede corregir en «Editar pedido». Sale en la ficha de la tienda, en «Mis compras», en el pedido del panel y en el recibo. Condiciones: Textos → «Recibo y cambios» (`exchangeTerms`).
+- **Recibo en imagen** (`reciboImagen`): botón con el ícono de imagen en cada pedido. Dibuja un PNG con forma de ticket (`src/lib/receiptImage.ts`, canvas) con el isotipo, los productos, el total, el sello «Pagado»/«Pago pendiente» y las condiciones de cambio; lo comparte o lo descarga. La factura PDF sigue igual.
+- **Eliminar un pedido devuelve sus unidades** (todos los planes con pedidos): mandar un pedido no cancelado a la papelera devuelve sus unidades a su opción y a su lote (`releaseOrderStock`); restaurarlo las vuelve a sacar si todavía hay (`retakeOrderStock`).
+- El dinero en pesos se escribe con función propia (`formatMoney` en `src/lib/format.ts`): el formato del navegador en Android ponía «DOP».
 
 **`public/gadr-planes.json`** lo leen gadrnet.com y la barra de la demo (formato fijo; precios en pesos enteros: Básico RD$500, Profesional RD$750, Completo RD$1,000 al mes, entrada el doble; `demo` es relativo a la web). Las listas `incluye` van completas (cada plan repite lo del anterior con la misma frase), así se calcula solo «Todo lo del plan X, y además» y la tabla para comparar. `public/_headers` le pone CORS abierto para poder leerlo desde otro sitio. Si cambia el reparto de arriba, actualiza también ese archivo.
 

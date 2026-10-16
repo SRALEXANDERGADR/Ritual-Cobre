@@ -37,8 +37,6 @@ export const Route = createRootRoute({
       { property: 'og:title', content: TITLE },
       { property: 'og:description', content: DESCRIPTION },
       { property: 'og:image', content: IMAGE },
-      { property: 'og:image:width', content: '1200' },
-      { property: 'og:image:height', content: '630' },
       { property: 'og:image:alt', content: 'Ritual Cobre — cuidado personal' },
       { property: 'og:type', content: 'website' },
       { property: 'og:url', content: SITE_URL },

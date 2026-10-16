@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import type { ChangeEvent, ComponentType, FormEvent, ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import {
-  AlertTriangle, Bell, BellOff, Check, ChevronLeft, Download, Layers, Smartphone, LayoutDashboard, ListOrdered, LogOut, Package,
-  Lock, Pencil, Plus, RotateCcw, Search, Share2, ShoppingBag, ShoppingCart, SlidersHorizontal, Trash2, Upload, Users, Wallet, X,
+  AlertTriangle, Bell, BellOff, Check, ChevronLeft, Download, Image as ImageIcon, Layers, Smartphone, LayoutDashboard, ListOrdered, LogOut, Package,
+  Lock, Pencil, Plus, RefreshCw, RotateCcw, Search, Share2, ShoppingBag, ShoppingCart, SlidersHorizontal, Trash2, Upload, Users, Wallet, X,
 } from 'lucide-react'
 import {
   CATEGORIES, checkSession, deleteCustomer, deleteExpense, deleteOrder, deletePurchase, deleteProduct,
@@ -13,7 +13,8 @@ import {
   getPushSetup, removePushSubscription, savePushSubscription, sendTestPush,
 } from '@/lib/store'
 import { fromBase64Url, toBase64Url } from '@/lib/push'
-import { CURRENCIES, formatMoney } from '@/lib/format'
+import { CURRENCIES, SITE_URL, formatMoney } from '@/lib/format'
+import { receiptImage } from '@/lib/receiptImage'
 import { PLAN_NOMBRES, planMinimo, puede, textoCandado } from '@/lib/plan'
 import type { Funcion, Plan } from '@/lib/plan'
 import {
@@ -28,8 +29,8 @@ const money = (value: number) => formatMoney(value, CURRENCY)
 const dateFmt = (value: string) => new Intl.DateTimeFormat('es-DO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 const shortDate = (value: string) => new Intl.DateTimeFormat('es-DO', { day: '2-digit', month: 'short' }).format(new Date(value))
 
-type Product = { id: number; name: string; category: string; description: string; options: string; price: number; originalPrice: number; stock: number; cost: number; image: string; variantImages: ProductVariant[]; optionStock: boolean; featured: boolean; isNew: boolean; bestSeller: boolean; active: boolean; createdAt: string; deletedAt: string | null }
-type OrderItem = { id: number; name: string; price: number; quantity: number; cost: number; option?: string; reinvCost?: number; reinvQty?: number }
+type Product = { id: number; name: string; category: string; description: string; options: string; price: number; originalPrice: number; stock: number; cost: number; image: string; variantImages: ProductVariant[]; optionStock: boolean; featured: boolean; isNew: boolean; bestSeller: boolean; active: boolean; exchangeDays: number; createdAt: string; deletedAt: string | null }
+type OrderItem = { id: number; name: string; price: number; quantity: number; cost: number; option?: string; reinvCost?: number; reinvQty?: number; exchangeDays?: number }
 type Order = { id: number; orderNumber: string; customerName: string; email: string; phone: string; address: string; items: OrderItem[]; discount: number; total: number; status: string; paymentStatus: string; notes: string; createdAt: string; deletedAt: string | null }
 type Customer = { id: number; name: string; email: string; phone: string; address: string; notes: string; createdAt: string; deletedAt: string | null }
 type ImageTrashRow = { id: number; path: string; url: string; reason: string; deletedAt: string }
@@ -42,7 +43,7 @@ type AdminData = { plan: Plan; demo: boolean; products: Product[]; orders: Order
  * no cambia aunque se le cambie el nombre, y `originalName` es el nombre
  * que tenía guardado — así sus compras la siguen si se renombra. */
 type OptionDraft = { key: string; name: string; originalName: string; image: string; description: string; price: string; stock: string }
-type ProductDraft = { id?: number; name: string; category: string; description: string; price: string; originalPrice: string; stock: string; image: string; optionStock: boolean; options: OptionDraft[]; featured: boolean; isNew: boolean; bestSeller: boolean; active: boolean }
+type ProductDraft = { id?: number; name: string; category: string; description: string; price: string; originalPrice: string; stock: string; image: string; optionStock: boolean; options: OptionDraft[]; featured: boolean; isNew: boolean; bestSeller: boolean; active: boolean; exchangeDays: string }
 type CustomerDraft = { id?: number; name: string; email: string; phone: string; address: string; notes: string }
 type PurchaseLine = { option: string; quantity: string; unitCost: string }
 type PurchaseDraft = { productId: string; notes: string; lines: PurchaseLine[]; sameCost: string; fund: Fund }
@@ -75,7 +76,7 @@ function emptyOption(): OptionDraft {
 }
 
 function emptyDraft(): ProductDraft {
-  return { name: '', category: CATEGORIES[0], description: '', price: '', originalPrice: '', stock: '0', image: '', optionStock: true, options: [], featured: false, isNew: false, bestSeller: false, active: true }
+  return { name: '', category: CATEGORIES[0], description: '', price: '', originalPrice: '', stock: '0', image: '', optionStock: true, options: [], featured: false, isNew: false, bestSeller: false, active: true, exchangeDays: '0' }
 }
 
 function toDraft(product: Product): ProductDraft {
@@ -85,8 +86,13 @@ function toDraft(product: Product): ProductDraft {
     optionStock: Boolean(product.optionStock),
     options: normalizeVariants(product).map((entry) => ({ key: newKey(), name: entry.option, originalName: entry.option, image: entry.image, description: entry.description, price: toMoneyInput(entry.price ?? 0), stock: String(entry.stock ?? 0) })),
     featured: product.featured, isNew: product.isNew, bestSeller: product.bestSeller, active: product.active,
+    exchangeDays: String(product.exchangeDays ?? 0),
   }
 }
+
+/** Botones rápidos para los días de cambio de un producto. */
+const EXCHANGE_PRESETS = [0, 3, 7, 15, 30]
+const daysText = (days: number) => `${days} ${days === 1 ? 'día' : 'días'}`
 
 function purchaseDraftFor(product?: Product): PurchaseDraft {
   const lines = product && tracksOptionStock(product)
@@ -262,6 +268,9 @@ const CONTENT_GROUPS: Array<{ title: string; hint?: string; fields: ContentField
     { key: 'navContact', label: 'Menú: contacto' },
     { key: 'cartTitle', label: 'Título del carrito', feature: 'carrito' },
     { key: 'checkoutTitle', label: 'Título al completar el pedido', feature: 'carrito' },
+  ] },
+  { title: 'Recibo y cambios', hint: 'Sale en el recibo en imagen cuando algún producto del pedido tiene días para cambio.', fields: [
+    { key: 'exchangeTerms', label: 'Condiciones para cambiar un producto', type: 'textarea', feature: 'cambios' },
   ] },
   { title: 'Políticas', hint: 'Se ven en la página de Políticas (enlace en el pie de página).', fields: [
     { key: 'policiesUpdated', label: 'Fecha de la última actualización' },
@@ -568,6 +577,10 @@ const LOCK_TEXT: Partial<Record<Funcion, string>> = {
   finanzas: 'Mira cuánto ganas, cuánto tienes para comprar mercancía y cuánto puedes retirar.',
   app: 'Instala el panel como app en tu teléfono y recibe un aviso por cada pedido nuevo.',
   papelera: 'Recupera durante 30 días lo que eliminaste por error.',
+  misCompras: 'Tus clientes ven en la tienda cómo va su compra y, mientras no la confirmes, la cambian o la anulan.',
+  recomendar: 'Cada producto tiene su enlace para recomendarlo por WhatsApp o redes, con su foto y su precio.',
+  cambios: 'Pon cuántos días tiene el cliente para cambiar cada producto. Sale en la tienda y en el recibo.',
+  reciboImagen: 'Manda a tu cliente un recibo en imagen, listo para WhatsApp, con tu logo y el sello de pagado.',
 }
 
 export function AdminPanel() {
@@ -754,6 +767,7 @@ export function AdminPanel() {
         isNew: draft.isNew,
         bestSeller: draft.bestSeller,
         active: draft.active,
+        exchangeDays: Math.max(0, Math.round(Number(draft.exchangeDays || 0))),
       } })
       if (!draft.id) createdId = Number(id)
       setEditing(null)
@@ -901,6 +915,41 @@ export function AdminPanel() {
       } else {
         doc.save(file.name)
       }
+    })
+  }
+
+  /** Recibo en imagen (PNG) para WhatsApp. Si el aparato no puede compartir
+   * archivos, se descarga. */
+  async function handleShareReceipt(order: Order) {
+    await withBusy(async () => {
+      const blob = await receiptImage({
+        brand: BRAND,
+        site: new URL(SITE_URL).host,
+        whatsapp: data?.content.whatsapp || '',
+        orderNumber: order.orderNumber,
+        createdAt: order.createdAt,
+        customerName: order.customerName,
+        phone: order.phone,
+        address: order.address,
+        items: order.items.map((item) => ({ name: item.name, price: item.price, quantity: item.quantity, exchangeDays: can('cambios') ? item.exchangeDays ?? 0 : 0 })),
+        discount: order.discount,
+        total: order.total,
+        paymentStatus: order.paymentStatus,
+        exchangeTerms: data?.content.exchangeTerms || '',
+        money,
+      })
+      const file = new File([blob], `Recibo-${order.orderNumber}.png`, { type: 'image/png' })
+      const nav = navigator as any
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        try { await nav.share({ files: [file], title: `Recibo ${order.orderNumber}` }); return }
+        catch (err) { if ((err as Error)?.name === 'AbortError') return }
+      }
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = file.name
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
     })
   }
 
@@ -1343,13 +1392,17 @@ export function AdminPanel() {
                   <div className="admin-order-actions">
                     <button className="icon-button" title="Editar pedido" onClick={() => { setError(''); setEditingOrder({ id: order.id, customerName: order.customerName, email: order.email, phone: order.phone, address: order.address, notes: order.notes, items: order.items.map((item) => ({ ...item, option: item.option ?? optionFromName(item.name) })), discount: order.discount }) }}><Pencil size={15} /></button>
                     <button className="icon-button" title="Descargar factura (PDF)" disabled={busy} onClick={() => handleDownloadInvoice(order)}><Download size={15} /></button>
-                    <button className="icon-button" title="Compartir factura" disabled={busy} onClick={() => handleShareInvoice(order)}><Share2 size={15} /></button>
-                    <button className="icon-button" title="Enviar a la papelera" onClick={() => { if (window.confirm(`${can('papelera') ? '¿Enviar este pedido a la papelera?' : '¿Eliminar este pedido?'}${order.status === 'Cancelado' ? '' : '\n\nOjo: esto NO devuelve las unidades al inventario. Si el pedido no se concretó, primero cámbialo a "Cancelado" (eso sí las devuelve).'}`)) withBusy(() => deleteOrder({ data: order.id })) }}><Trash2 size={15} /></button>
+                    <button className="icon-button" title="Compartir factura (PDF)" disabled={busy} onClick={() => handleShareInvoice(order)}><Share2 size={15} /></button>
+                    {can('reciboImagen')
+                      ? <button className="icon-button" title="Recibo en imagen para WhatsApp" disabled={busy} onClick={() => handleShareReceipt(order)}><ImageIcon size={15} /></button>
+                      : demo && <button className="icon-button is-locked" title={textoCandado('reciboImagen')} onClick={() => lockNotice('Recibo en imagen', 'reciboImagen')}><ImageIcon size={15} /></button>}
+                    <button className="icon-button" title="Enviar a la papelera" onClick={() => { const units = order.items.reduce((sum, item) => sum + item.quantity, 0); if (window.confirm(`${can('papelera') ? '¿Enviar este pedido a la papelera?' : '¿Eliminar este pedido?'}${order.status === 'Cancelado' ? '' : `\n\nSus ${units} ${units === 1 ? 'unidad vuelve' : 'unidades vuelven'} al inventario.`}`)) withBusy(() => deleteOrder({ data: order.id })) }}><Trash2 size={15} /></button>
                   </div>
                 </div>
                 <p className="admin-order-customer">{order.customerName} · {order.phone}{order.address ? ` · ${order.address}` : ''}</p>
+                {order.notes && <p className="admin-order-notes">{order.notes}</p>}
                 <ul className="admin-order-items">{order.items.map((item, index) => <li key={`${item.id}-${index}`}>
-                  <div>{item.quantity}× {item.name}{can('finanzas') && <small>Costó {money(item.cost)} cada una · ganancia {money((item.price - item.cost) * item.quantity)}{(item.reinvQty ?? 0) > 0 ? (item.reinvQty === item.quantity ? ' · con el dinero para reinvertir' : ` · ${item.reinvQty} de ${item.quantity} con el dinero para reinvertir`) : ''}</small>}</div>
+                  <div>{item.quantity}× {item.name}{can('cambios') && (item.exchangeDays ?? 0) > 0 && <small className="order-exchange"><RefreshCw size={11} />Cambio: {daysText(item.exchangeDays ?? 0)}</small>}{can('finanzas') && <small>Costó {money(item.cost)} cada una · ganancia {money((item.price - item.cost) * item.quantity)}{(item.reinvQty ?? 0) > 0 ? (item.reinvQty === item.quantity ? ' · con el dinero para reinvertir' : ` · ${item.reinvQty} de ${item.quantity} con el dinero para reinvertir`) : ''}</small>}</div>
                   <span>{money(item.price * item.quantity)}</span>
                 </li>)}</ul>
                 <div className="admin-order-foot">
@@ -1431,8 +1484,8 @@ export function AdminPanel() {
               {data.trash.products.map((product) => <div className="admin-row" key={product.id}>
                 <div><strong>{product.name}</strong><span>Quedan {product.deletedAt ? daysLeft(product.deletedAt) : 30} días</span></div>
                 <div className="admin-row-actions">
-                  <button onClick={() => withBusy(() => restoreProduct({ data: product.id }))}><RotateCcw size={15} /></button>
-                  <button onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeProduct({ data: product.id })) }}><Trash2 size={15} /></button>
+                  <button title="Restaurar" aria-label="Restaurar" onClick={() => withBusy(() => restoreProduct({ data: product.id }))}><RotateCcw size={15} /></button>
+                  <button title="Eliminar para siempre" aria-label="Eliminar para siempre" onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeProduct({ data: product.id })) }}><Trash2 size={15} /></button>
                 </div>
               </div>)}
               {!data.trash.products.length && <p className="admin-empty">Vacío.</p>}
@@ -1442,8 +1495,8 @@ export function AdminPanel() {
               {data.trash.orders.map((order) => <div className="admin-row" key={order.id}>
                 <div><strong>{order.orderNumber}</strong><span>Quedan {order.deletedAt ? daysLeft(order.deletedAt) : 30} días</span></div>
                 <div className="admin-row-actions">
-                  <button onClick={() => withBusy(() => restoreOrder({ data: order.id }))}><RotateCcw size={15} /></button>
-                  <button onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeOrder({ data: order.id })) }}><Trash2 size={15} /></button>
+                  <button title="Restaurar" aria-label="Restaurar" onClick={() => withBusy(() => restoreOrder({ data: order.id }))}><RotateCcw size={15} /></button>
+                  <button title="Eliminar para siempre" aria-label="Eliminar para siempre" onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeOrder({ data: order.id })) }}><Trash2 size={15} /></button>
                 </div>
               </div>)}
               {!data.trash.orders.length && <p className="admin-empty">Vacío.</p>}
@@ -1453,8 +1506,8 @@ export function AdminPanel() {
               {data.trash.customers.map((customer) => <div className="admin-row" key={customer.id}>
                 <div><strong>{customer.name}</strong><span>Quedan {customer.deletedAt ? daysLeft(customer.deletedAt) : 30} días</span></div>
                 <div className="admin-row-actions">
-                  <button onClick={() => withBusy(() => restoreCustomer({ data: customer.id }))}><RotateCcw size={15} /></button>
-                  <button onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeCustomer({ data: customer.id })) }}><Trash2 size={15} /></button>
+                  <button title="Restaurar" aria-label="Restaurar" onClick={() => withBusy(() => restoreCustomer({ data: customer.id }))}><RotateCcw size={15} /></button>
+                  <button title="Eliminar para siempre" aria-label="Eliminar para siempre" onClick={() => { if (window.confirm('¿Eliminar definitivamente? No se puede deshacer.')) withBusy(() => purgeCustomer({ data: customer.id })) }}><Trash2 size={15} /></button>
                 </div>
               </div>)}
               {!data.trash.customers.length && <p className="admin-empty">Vacío.</p>}
@@ -1549,8 +1602,18 @@ export function AdminPanel() {
               : <p className="content-hint">Pon cuántas unidades tienes. Cuando se venda algo, baja solo.</p>}
           </fieldset>
 
+          {can('cambios') ? <fieldset className="form-section">
+            <legend>{can('opciones') ? 5 : 4} · Cambios</legend>
+            <p className="content-hint">¿Cuántos días tiene el cliente para cambiar este producto después de recibirlo? Sale en la tienda, en «Mis compras» y en el recibo.</p>
+            <div className="exchange-presets" role="group" aria-label="Días para cambio">
+              {EXCHANGE_PRESETS.map((days) => <button key={days} type="button" className={Number(editing.exchangeDays || 0) === days ? 'active' : ''} onClick={() => setEditing((current) => current && { ...current, exchangeDays: String(days) })}>{days ? daysText(days) : 'Sin cambio'}</button>)}
+            </div>
+            <label>Otro número de días<input type="number" inputMode="numeric" min={0} max={365} value={editing.exchangeDays} onChange={(event) => setEditing((current) => current && { ...current, exchangeDays: event.target.value })} /></label>
+          </fieldset>
+          : demo && <p className="plan-lock plan-lock-inline"><Lock size={18} /><span><strong>Días para cambio</strong>{textoCandado('cambios')}</span></p>}
+
           <fieldset className="form-section">
-            <legend>{can('opciones') ? 5 : 4} · En la tienda</legend>
+            <legend>{(can('opciones') ? 5 : 4) + (can('cambios') ? 1 : 0)} · En la tienda</legend>
             <div className="form-checks">
               <label><input type="checkbox" checked={editing.active} onChange={(event) => setEditing((current) => current && { ...current, active: event.target.checked })} />Visible en la tienda</label>
               <label><input type="checkbox" checked={editing.featured} onChange={(event) => setEditing((current) => current && { ...current, featured: event.target.checked })} />Destacado</label>
@@ -1596,6 +1659,7 @@ export function AdminPanel() {
               <input type="number" min={1} value={item.quantity} onChange={(event) => setEditingOrder((current) => current && { ...current, items: current.items.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: Number(event.target.value) } : row) })} />
               <input type="number" min={0} step="0.01" value={item.price / 100} onChange={(event) => setEditingOrder((current) => current && { ...current, items: current.items.map((row, rowIndex) => rowIndex === index ? { ...row, price: Math.round(Number(event.target.value) * 100) } : row) })} />
               <button type="button" className="icon-button" disabled={editingOrder.items.length <= 1} onClick={() => setEditingOrder((current) => current && { ...current, items: current.items.filter((_, rowIndex) => rowIndex !== index) })}><X size={14} /></button>
+              {can('cambios') && <label className="order-edit-exchange"><RefreshCw size={12} />Días para cambio<input type="number" min={0} max={365} value={item.exchangeDays ?? 0} onChange={(event) => setEditingOrder((current) => current && { ...current, items: current.items.map((row, rowIndex) => rowIndex === index ? { ...row, exchangeDays: Math.max(0, Math.round(Number(event.target.value) || 0)) } : row) })} /></label>}
             </div>
           ))}
           {(() => {
