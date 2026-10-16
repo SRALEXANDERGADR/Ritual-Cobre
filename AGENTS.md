@@ -48,7 +48,7 @@ Ritual Cobre is a TanStack Start ecommerce application deployed on Cloudflare Wo
 
 Es el MISMO código para los tres planes; el plan lo decide la variable `PLAN` de `wrangler.jsonc` (`vars`):
 
-- `"demo"` → la web de muestra en venta (valor actual). El plan se escoge con `?plan=basico|profesional|completo` en cualquier dirección; se recuerda 30 días en la cookie `gadr_plan`. Sin `?plan` y sin cookie = completo. Abajo sale la barrita «Demo · Plan X · Cambiar plan · Ver precios» (`src/components/PlanBar.tsx`), solo en modo demo.
+- `"demo"` → la web de muestra en venta (valor actual). El plan se escoge con `?plan=basico|profesional|completo` en cualquier dirección; se recuerda 30 días en la cookie `gadr_plan`. Sin `?plan` y sin cookie = completo. Arriba sale la barra de la demo de GADR (`src/components/GadrDemo.tsx` + `src/gadr-demo.css`, el mismo archivo en todas las webs de GADR): los 3 planes con su precio (tocar uno abre la web en ese plan) y «Planes», que abre los precios, lo que trae cada plan y una tabla para comparar, con «Probar» y «Lo quiero» (lleva a gadrnet.com con el plan escogido). Lee los precios de `public/gadr-planes.json`. Solo en modo demo. Los encabezados fijos usan `top: var(--gd-h, 0px)` para quedar debajo de la barra.
 - `"basico"`, `"profesional"` o `"completo"` → web ya vendida a un cliente: el plan queda fijo, la dirección no lo cambia y no sale la barrita.
 - Sin `PLAN` (o con un valor raro) → se comporta como `completo`.
 
@@ -77,7 +77,7 @@ Cómo se aplica:
 - **Existencias sin lotes (Básico y Profesional):** la cantidad se escribe directo en el producto (nuevo o existente) y, en Profesional, al vender sigue bajando sola. Solo con lotes (Completo) un producto nuevo empieza en 0 y se llena con «Reponer». Si luego se sube a Completo, esas unidades salen como «Sin costo registrado» hasta registrar sus compras.
 - **Lo que esta web NO tiene** (así que no está en ningún plan): «Mis pedidos» para el cliente, compartir artículo, socios y garantía.
 
-**`public/gadr-planes.json`** lo lee gadrnet.com (formato fijo; precios en pesos enteros; `demo` es relativo a la web). `public/_headers` le pone CORS abierto para poder leerlo desde otro sitio. Si cambia el reparto de arriba, actualiza también ese archivo.
+**`public/gadr-planes.json`** lo leen gadrnet.com y la barra de la demo (formato fijo; precios en pesos enteros: Básico RD$500, Profesional RD$750, Completo RD$1,000 al mes, entrada el doble; `demo` es relativo a la web). Las listas `incluye` van completas (cada plan repite lo del anterior con la misma frase), así se calcula solo «Todo lo del plan X, y además» y la tabla para comparar. `public/_headers` le pone CORS abierto para poder leerlo desde otro sitio. Si cambia el reparto de arriba, actualiza también ese archivo.
 
 **Probar:** abrir `/?plan=basico`, `/?plan=profesional` y `/?plan=completo` (y `/admin` en cada uno) en tamaño de teléfono. En Completo todo debe funcionar igual que antes.
 

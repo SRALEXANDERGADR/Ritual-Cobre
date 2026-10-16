@@ -1,12 +1,12 @@
 import { HeadContent, Link, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
-import { PlanBar } from '@/components/PlanBar'
+import { GadrDemo } from '@/components/GadrDemo'
 import { SITE_URL } from '@/lib/format'
 import { getPlanInfo } from '@/lib/store'
 
 import '../styles.css'
-import '../plan-bar.css'
+import '../gadr-demo.css'
 
 const TITLE = 'Ritual Cobre — cuidado personal sensorial'
 const DESCRIPTION = 'Fórmulas sensoriales para convertir lo cotidiano en un pequeño ritual de presencia. Aceites, bálsamos, brumas y jabones hechos en pequeños lotes.'
@@ -64,8 +64,10 @@ function RootComponent() {
   const { plan, demo } = Route.useLoaderData()
   return (
     <>
+      {/* Barra de la demo de GADR (solo con PLAN = "demo"). Va antes de la
+          página para guardar la cookie del plan antes de pedir datos. */}
+      <GadrDemo plan={plan} demo={demo} web="Ritual Cobre" />
       <Outlet />
-      <PlanBar plan={plan} demo={demo} />
     </>
   )
 }

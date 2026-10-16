@@ -14,7 +14,7 @@ import {
 } from '@/lib/store'
 import { fromBase64Url, toBase64Url } from '@/lib/push'
 import { CURRENCIES, formatMoney } from '@/lib/format'
-import { puede, textoCandado } from '@/lib/plan'
+import { PLAN_NOMBRES, planMinimo, puede, textoCandado } from '@/lib/plan'
 import type { Funcion, Plan } from '@/lib/plan'
 import {
   hasOwnPrice, normalizeVariants, optionFromName, optionPrice, optionStock, parseOptions, priceRange, tracksOptionStock,
@@ -1072,7 +1072,7 @@ export function AdminPanel() {
     ? <button type="button" className="is-locked" title={textoCandado(funcion)} onClick={() => lockNotice(label, funcion)}><Icon size={14} />{label}<Lock size={11} /></button>
     : null
   const lockedQuick = (label: string, Icon: ComponentType<{ size?: number }>, funcion: Funcion) => demo && !can(funcion)
-    ? <button type="button" className="is-locked" title={textoCandado(funcion)} onClick={() => lockNotice(label, funcion)}><Icon size={20} /><span>{label}</span><small className="lock-tag"><Lock size={11} />{textoCandado(funcion)}</small></button>
+    ? <button type="button" className="is-locked" title={textoCandado(funcion)} onClick={() => lockNotice(label, funcion)}><Icon size={20} /><span>{label}</span><small className="lock-tag"><Lock size={11} />Plan {PLAN_NOMBRES[planMinimo(funcion)]}</small></button>
     : null
 
   const goTab = (id: Tab) => { setTab(id); setQuery(''); setCatalogFilter('todos'); setCatalogCategory(''); setNotice('') }
