@@ -310,7 +310,7 @@ button.product-image{border:0;padding:0;width:100%;display:block;cursor:zoom-in;
 .floating-whatsapp{position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:45;width:56px;height:56px;border-radius:50%;background:#1f9d57;color:#fff;display:grid;place-items:center;box-shadow:0 12px 30px rgba(15,60,35,.35);transition:transform .25s ease}
 .floating-whatsapp:hover{transform:scale(1.06)}
 .floating-whatsapp svg{width:26px;height:26px}
-.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:90;background:var(--ink);color:#fff;padding:14px 20px;font-size:13px;box-shadow:0 14px 40px rgba(0,0,0,.25);max-width:calc(100vw - 32px);animation:reveal .3s both}
+.toast{position:fixed;left:0;right:0;margin-inline:auto;width:max-content;bottom:calc(24px + env(safe-area-inset-bottom));z-index:90;background:var(--ink);color:#fff;padding:14px 20px;font-size:13px;box-shadow:0 14px 40px rgba(0,0,0,.25);max-width:calc(100vw - 32px);animation:reveal .3s both}
 /* Menú lateral */
 .drawer-logo .brand-logo-name{font-size:17px}
 .side-menu{display:flex;flex-direction:column}

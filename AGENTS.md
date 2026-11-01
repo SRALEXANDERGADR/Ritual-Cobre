@@ -94,3 +94,7 @@ Cómo se aplica:
 
 **Probar:** abrir `/?plan=basico`, `/?plan=profesional` y `/?plan=completo` (y `/admin` en cada uno) en tamaño de teléfono. En Completo todo debe funcionar igual que antes.
 
+
+## Avisos (noviembre 2026)
+
+- El aviso «Agregado a la bolsa» sale centrado y a lo ancho en el teléfono (antes la animación le quitaba el centrado y salía angosto a la derecha). Al abrir la bolsa se quita para no tapar el botón de continuar.

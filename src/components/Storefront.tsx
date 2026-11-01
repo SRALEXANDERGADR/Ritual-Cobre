@@ -241,6 +241,11 @@ export function Storefront({ data, initialProductId }: Props) {
     toastTimer.current = setTimeout(() => setToast(''), 2600)
   }
 
+  // Al abrir la bolsa, el aviso se quita para no tapar el botón de continuar.
+  useEffect(() => {
+    if (cartOpen) setToast('')
+  }, [cartOpen])
+
   // Agrega a la bolsa SIN abrirla (como en JB): sale un aviso con «Ver bolsa».
   const addToCart = (product: Product, amount = 1, option = '') => {
     const options = parseOptions(product.options)
