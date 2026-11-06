@@ -434,6 +434,8 @@ export function Storefront({ data, initialProductId }: Props) {
     </aside>
 
     <main>
+      {/* La portada empieza directo con el catálogo: este título principal no se ve, pero lo leen Google y los lectores de pantalla. */}
+      <h1 className="sr-only">{brand} — cuidado personal</h1>
       <section className="catalog" id="catalogo">
         <div className="catalog-layout">
           <aside className="filters">

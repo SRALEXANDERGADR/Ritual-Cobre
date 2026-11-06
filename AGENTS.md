@@ -98,3 +98,5 @@ Cómo se aplica:
 ## Avisos (noviembre 2026)
 
 - El aviso «Agregado a la bolsa» sale centrado y a lo ancho en el teléfono (antes la animación le quitaba el centrado y salía angosto a la derecha). Al abrir la bolsa se quita para no tapar el botón de continuar.
+- La portada empieza directo con el catálogo, sin título visible: hay un `<h1 className="sr-only">` («Ritual Cobre — cuidado personal») para Google y los lectores de pantalla (clase `.sr-only` al final de `styles.css`).
+- Datos de la demo (en la base, no en el código): precios de RD$300 a RD$950, WhatsApp e Instagram del dueño (@gadr_net) y sin correo público. El correo de avisos (`notificationEmail`) es privado: la tienda nunca lo manda.
